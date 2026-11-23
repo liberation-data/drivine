@@ -1,5 +1,6 @@
 import { judgeLayout, runOn } from '@/backend/sql/StoreLayout';
 import { DatabaseType } from '@/connection/DatabaseType';
+import { DrivineLogger } from '@/logger';
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import { Connection } from '@/connection/Connection';
 import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
@@ -18,6 +19,7 @@ export class PostgresConnectionProvider implements ConnectionProvider {
     readonly connectionProperties: PoolConfig;
 
     private readonly pool: Pool;
+    private readonly logger = new DrivineLogger(PostgresConnectionProvider.name);
     private readonly firstConnection = new FirstConnection(
         () => `graph '${this.graphName}' on ${this.type} database '${this.name}'`
     );
@@ -34,6 +36,11 @@ export class PostgresConnectionProvider implements ConnectionProvider {
     ) {
         this.connectionProperties = maskedProperties({ ...connectionProperties });
         this.pool = new Pool({ ...connectionProperties });
+        // An idle session the server ends (a restart, a failover, a session killed, an idle timeout) is dropped by the
+        // pool, which says so as an 'error': unheard, Node would end the process for it.
+        this.pool.on('error', (e) =>
+            this.logger.warn(`A pooled session to ${this.name} was ended by the server: ${e.message}`)
+        );
         // Refuses a name that can't name the graph's tables now, rather than at the first statement.
         new PostgresGraph(this.graphName);
     }
@@ -52,7 +59,7 @@ export class PostgresConnectionProvider implements ConnectionProvider {
      */
     async connect(): Promise<Connection> {
         const client = await this.firstConnection.ensured(
-            await this.pool.connect(),
+            await this.checkout(),
             async (it) => {
                 const graph = new PostgresGraph(this.graphName);
                 await judgeLayout(
@@ -73,7 +80,7 @@ export class PostgresConnectionProvider implements ConnectionProvider {
      * store layout migration runs on, as the graph it migrates is one {@link connect} refuses (see StoreLayoutMigration).
      */
     async connectUnjudged(): Promise<Connection> {
-        return this.connection(await this.pool.connect());
+        return this.connection(await this.checkout());
     }
 
     /** Makes the graph's tables on `connection` as a first connection makes them, without the layout's verdict. */
@@ -98,6 +105,29 @@ export class PostgresConnectionProvider implements ConnectionProvider {
 
     [INSPECT](): Record<string, unknown> {
         return this.toJSON();
+    }
+
+    /**
+     * A session from the pool, heard while it is out of it. The server may end a session in use as it may an idle one,
+     * and node-postgres then rejects the statement running, if any, and says so as an 'error' too, which the pool hears
+     * only while the session is idle: unheard, Node would end the process for it. A session so ended is closed for good
+     * when it is released, never pooled again, and the listener goes with the release.
+     */
+    private async checkout(): Promise<PoolClient> {
+        const client = await this.pool.connect();
+        let ended: Error | undefined;
+        const heard = (e: Error): void => {
+            ended = e;
+            this.logger.warn(`A session to ${this.name} was ended by the server while in use: ${e.message}`);
+        };
+        client.on('error', heard);
+        // The pool gives each checkout a release of its own.
+        const release = client.release;
+        client.release = (err?: Error | boolean) => {
+            client.removeListener('error', heard);
+            return release(err || ended);
+        };
+        return client;
     }
 
     /** `client` as a connection, its session's id read first where it has none; handed back to the pool where that fails. */
