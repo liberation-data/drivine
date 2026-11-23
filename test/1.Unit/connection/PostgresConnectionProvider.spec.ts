@@ -1,6 +1,10 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { PostgresConnectionProvider } from '@/connection/postgres/PostgresConnectionProvider';
 import { DrivineLogger } from '@/logger';
+import { EventEmitter } from 'events';
+
+/** A pooled client as node-postgres gives one: it says, as an 'error', that the server ended its session. */
+const pooledClient = <T extends object>(client: T): T & EventEmitter => Object.assign(new EventEmitter(), client);
 
 /**
  * The first connection makes the graph's tables, and runs the block again when a deadlock turned it away
@@ -12,7 +16,7 @@ describe('PostgresConnectionProvider', () => {
     type Failing = { provider: PostgresConnectionProvider; blocks: () => number; release: jest.Mock };
     const providerFailing = (...codes: string[]): Failing => {
         let blocks = 0;
-        const client = {
+        const client = pooledClient({
             query: async (sql: string | { text: string }) => {
                 const text = typeof sql === 'string' ? sql : sql.text;
                 if (text.includes('pg_backend_pid')) {
@@ -28,7 +32,7 @@ describe('PostgresConnectionProvider', () => {
                     : Promise.resolve({ rows: [] });
             },
             release: jest.fn()
-        };
+        });
         const provider = new PostgresConnectionProvider('PG', DatabaseType.POSTGRES, {}, 'pg_first');
         Object.assign(provider, { pool: { connect: async () => Promise.resolve(client) } });
         return { provider, blocks: () => blocks, release: client.release };
@@ -85,7 +89,7 @@ describe('PostgresConnectionProvider', () => {
     it('should hand a connection back to the pool where its session id could not be read, judged or not', async () => {
         for (const connect of ['connect', 'connectUnjudged'] as const) {
             const failure = new Error('connection terminated');
-            const client = {
+            const client = pooledClient({
                 query: async (sql: string | { text: string }) => {
                     const text = typeof sql === 'string' ? sql : sql.text;
                     if (text.includes('pg_backend_pid')) {
@@ -96,11 +100,75 @@ describe('PostgresConnectionProvider', () => {
                     });
                 },
                 release: jest.fn()
-            };
+            });
             const provider = new PostgresConnectionProvider('PG', DatabaseType.POSTGRES, {}, 'pg_session');
             Object.assign(provider, { pool: { connect: async () => Promise.resolve(client) } });
+            // The pool's own release, which the provider's checkout wraps.
+            const release = client.release;
             await expect(provider[connect]()).rejects.toBe(failure);
-            expect(client.release).toHaveBeenCalledWith(failure);
+            expect(release).toHaveBeenCalledWith(failure);
         }
+    });
+
+    /**
+     * The server may end a session in use, as on a restart, a failover or a session killed: node-postgres rejects the
+     * statement running and says so as an 'error' too, which, unheard, would end the process. Heard while the session is
+     * out of the pool, warned of, and the session closed for good when it is released.
+     */
+    describe('a session the server ends', () => {
+        type Ending = { provider: PostgresConnectionProvider; client: EventEmitter & { release: jest.Mock } };
+        const ending = (): Ending => {
+            const client = pooledClient({
+                query: async (sql: string | { text: string }) => {
+                    const text = typeof sql === 'string' ? sql : sql.text;
+                    if (text.includes('pg_backend_pid')) {
+                        return Promise.resolve({ rows: [{ sid: 's.1' }] });
+                    }
+                    return Promise.resolve({
+                        rows: text.startsWith('SELECT count(*) AS "made"') ? [{ made: '0' }] : []
+                    });
+                },
+                release: jest.fn()
+            });
+            const provider = new PostgresConnectionProvider('PG', DatabaseType.POSTGRES, {}, 'pg_ended');
+            Object.assign(provider, { pool: { connect: async () => Promise.resolve(client) } });
+            return { provider, client };
+        };
+
+        it('should hear it while the session is in use, judged or not, and close the session for good on release', async () => {
+            for (const connect of ['connect', 'connectUnjudged'] as const) {
+                const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+                const { provider, client }: Ending = ending();
+                const release = client.release;
+                const connection = await provider[connect]();
+                const ended = new Error('Connection terminated unexpectedly');
+                expect(() => client.emit('error', ended)).not.toThrow();
+                expect(warn).toHaveBeenCalledWith(expect.stringContaining('Connection terminated unexpectedly'));
+                await connection.release();
+                expect(release).toHaveBeenCalledWith(ended);
+                expect(client.listenerCount('error')).toEqual(0);
+                warn.mockRestore();
+            }
+        });
+
+        it('should give a session back to the pool as before where the server ended none', async () => {
+            const { provider, client }: Ending = ending();
+            const release = client.release;
+            const connection = await provider.connect();
+            await connection.release();
+            expect(release).toHaveBeenCalledWith(undefined);
+            expect(client.listenerCount('error')).toEqual(0);
+        });
+
+        it("should hear an idle session's end, which the pool says of it", () => {
+            const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+            const provider = new PostgresConnectionProvider('PG', DatabaseType.POSTGRES, {}, 'pg_idle');
+            const pool = (provider as any).pool as EventEmitter;
+            expect(() =>
+                pool.emit('error', new Error('terminating connection due to administrator command'))
+            ).not.toThrow();
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('administrator command'));
+            warn.mockRestore();
+        });
     });
 });
