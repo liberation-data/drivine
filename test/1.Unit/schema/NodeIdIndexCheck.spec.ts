@@ -412,6 +412,13 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
             expect(too.mock.invocationCallOrder[0]).toBeLessThan(
                 listed.mock.invocationCallOrder[listed.mock.calls.length - 1]
             );
+            // A later enforce names what was ensured among the rest, on the databases it was ensured on.
+            await manager.enforce();
+            const again = [...catalogued.mock.calls[1][0]].map(([database, named]) => [database, [...named].sort()]);
+            expect(again).toEqual([
+                ['graph', ['Customer', 'Person']],
+                ['other', ['Customer', 'Order', 'UnindexedSession']]
+            ]);
         } finally {
             DatabaseRegistry.tearDown();
             DatabaseRegistry.getInstance().register({ name: 'graph', type: DatabaseType.NEO4J } as ConnectionProvider);
