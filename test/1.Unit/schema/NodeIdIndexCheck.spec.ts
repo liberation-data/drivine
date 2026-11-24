@@ -105,6 +105,11 @@ describe('NodeIdIndexCheck', () => {
         NodeIdIndexCheck.cataloguedToo('b', ['Order']);
         NodeIdIndexCheck.listed('b', []);
         expect(warnings).toEqual([ORDER_WARNING + on('a'), ORDER_WARNING + on('b')]);
+        // What b's catalogs named before is kept beside it: Invoice is still checked on b alone.
+        use(InvoiceFixture);
+        expect(warnings.slice(2)).toHaveLength(1);
+        expect(warnings[2]).toContain('InvoiceFixture');
+        expect(warnings[2].endsWith(on('b'))).toBe(true);
     });
 
     it('should check a fragment no catalog names on every database listed', () => {
