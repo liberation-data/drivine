@@ -124,27 +124,13 @@ describe("The schema declarations, as the spec's declarations.yaml pins what the
         expect(Object.keys(GAPS).filter((it) => !CASES.some((c) => c.case === it))).toEqual([]);
     });
 
-    // Until a fragment's @NodeId gets its range index by default (#800), the rest of a fragment's items are the pin's, in
-    // the order drivine4j gives them: the default is the one item missing.
-    it.each(['fragment', 'fragments merged', 'fragment ignoring case', "fragment without its id's index"])(
-        'gives the planner the items of %s in the pin, but for the default index over the @NodeId',
-        (name) => {
-            const pinned = CASES.find((it) => it.case === name)!;
-            const items = pinned.catalogs[0].items.filter(
-                (it) => !(it.kind === 'RANGE_INDEX' && JSON.stringify(it.properties) === '["id"]')
-            );
-            const catalog = DECLARATIONS[name].catalogs[0];
-            expect(JSON.parse(JSON.stringify(catalog.items.map(moduleSpec)))).toEqual(items);
-        }
-    );
-
-    // And until a full-text index takes an analyzer (#648), a fragment's own items are the pin's, in its order, but for
-    // the analyzer and the default index.
-    it("gives the planner the items of fragment class items in the pin, but for the analyzer and the @NodeId's index", () => {
+    // Until a full-text index takes an analyzer (#648), a fragment's own items are the pin's, in its order, but for the
+    // analyzer.
+    it('gives the planner the items of fragment class items in the pin, but for the analyzer', () => {
         const pinned = CASES.find((it) => it.case === 'fragment class items')!;
-        const items = pinned.catalogs[0].items
-            .filter((it) => !(it.kind === 'RANGE_INDEX' && JSON.stringify(it.properties) === '["id"]'))
-            .map((it) => (it.kind === 'FULLTEXT_INDEX' ? { ...it, analyzer: null } : it));
+        const items = pinned.catalogs[0].items.map((it) =>
+            it.kind === 'FULLTEXT_INDEX' ? { ...it, analyzer: null } : it
+        );
         const catalog = DECLARATIONS['fragment class items'].catalogs[0];
         expect(JSON.parse(JSON.stringify(catalog.items.map(moduleSpec)))).toEqual(items);
     });

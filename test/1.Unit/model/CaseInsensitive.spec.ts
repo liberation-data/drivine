@@ -330,6 +330,8 @@ describe('@CaseInsensitive', () => {
             // The indexes before the constraints, as drivine4j's catalog gives them (drivine-cypher-spec#135).
             expect(items).toEqual([
                 rangeIndex('CiMember', 'handle_name', { ignoreCase: true }),
+                // The @NodeId's own, which no item that ignores case serves.
+                rangeIndex('CiMember', 'id'),
                 uniquenessConstraint('CiMember', 'email', { ignoreCase: true, nodeIdProperty: 'id' })
             ]);
         });

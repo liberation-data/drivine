@@ -46,7 +46,7 @@ class Account {
     name: string;
 }
 
-@NodeFragment({ labels: ['Ticket'] })
+@NodeFragment({ labels: ['Ticket'], nodeIdIndex: false })
 class Ticket {
     @NodeId() id: string;
 }
@@ -85,16 +85,12 @@ const dimensions = (): number => 384;
 /**
  * The cases this library can't yet declare as drivine4j does, each with the issue that adds what it needs. Each is still
  * declared, as near as this library's API comes, and expected to fail until its issue lands, when the test fails and the
- * case is taken off this list: a fragment's @NodeId is given no range index by default and none can be turned off (#800),
- * a full-text index takes no analyzer (#648), and there is no TEXT index (#541).
+ * case is taken off this list: a full-text index takes no analyzer (#648), and there is no TEXT index (#541).
  */
 export const GAPS: Record<string, string[]> = {
     'full-text': ['#648'],
     text: ['#541'],
-    fragment: ['#800'],
-    'fragment class items': ['#800', '#648'],
-    'fragments merged': ['#800'],
-    'fragment ignoring case': ['#800']
+    'fragment class items': ['#648']
 };
 
 /** What each case declares, in this library's own API: its startup catalogs, and what is ensured at runtime, by owner, before an enforce. */
@@ -150,7 +146,6 @@ export const DECLARATIONS: Record<string, { catalogs: SchemaCatalog[]; runtime?:
     text: { catalogs: [SchemaCatalog.of({ kind: 'TEXT', label: 'Person', properties: ['name'] } as any)] },
     fragment: { catalogs: [SchemaCatalog.fromFragments(dimensions, Article)] },
     'fragment id served by a constraint': { catalogs: [SchemaCatalog.fromFragments(undefined, Account)] },
-    // A @NodeId gets no index by default until #800, which adds the default and the means to turn it off, as here.
     "fragment without its id's index": { catalogs: [SchemaCatalog.fromFragments(undefined, Ticket)] },
     'fragment class items': { catalogs: [SchemaCatalog.fromFragments(undefined, Message)] },
     'fragments merged': { catalogs: [SchemaCatalog.fromFragments(undefined, Customer, PreferredCustomer)] },

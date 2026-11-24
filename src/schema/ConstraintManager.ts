@@ -1,4 +1,5 @@
 import { DrivineError } from '@/DrivineError';
+import { NodeIdIndexCheck } from '@/schema/NodeIdIndexCheck';
 import type { SchemaItem } from '@/schema/SchemaGrammar';
 import { EnsureResult, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
 import {
@@ -121,6 +122,9 @@ export class ConstraintManager {
         if (!item.result) {
             throw new DrivineError(`The plan of ${call} of the constraint on ${spec.label} gave no result.`);
         }
-        return ensureResult(item.result, spec);
+        const result = ensureResult(item.result, spec);
+        // Kept current for the check of an unindexed @NodeId, where an enforce listed the database.
+        NodeIdIndexCheck.ensured(this.planning.database, spec, result);
+        return result;
     }
 }

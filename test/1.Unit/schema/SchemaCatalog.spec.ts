@@ -117,9 +117,10 @@ describe('SchemaCatalog.fromFragments', () => {
         }
         // Each declaration is kept: a constraint beside an index is made, as drivine4j makes it.
         const items = SchemaCatalog.fromFragments(undefined, TwoOnOne).items;
-        expect(items).toHaveLength(5);
+        expect(items).toHaveLength(6);
         expect(items).toEqual(
             expect.arrayContaining([
+                { kind: 'RANGE', label: 'TwoOnOne', properties: ['id'] },
                 { kind: 'RANGE', label: 'TwoOnOne', properties: ['email'] },
                 { kind: 'UNIQUE', label: 'TwoOnOne', properties: ['email'], nodeIdProperty: 'id' },
                 { kind: 'FULLTEXT', label: 'TwoOnOne', properties: ['handle'] },
@@ -167,9 +168,10 @@ describe('SchemaCatalog.fromFragments', () => {
             @CaseInsensitive() @RangeIndex({ ignoreCase: true }) @Unique({ ignoreCase: true }) email: string;
         }
         const items = SchemaCatalog.fromFragments(undefined, BothIgnoreCase).items;
-        expect(items).toHaveLength(2);
+        expect(items).toHaveLength(3);
         expect(items).toEqual(
             expect.arrayContaining([
+                { kind: 'RANGE', label: 'BothIgnoreCase', properties: ['id'] },
                 expect.objectContaining({ kind: 'RANGE', properties: ['email'], ignoreCase: true }),
                 expect.objectContaining({ kind: 'UNIQUE', properties: ['email'], ignoreCase: true })
             ])
@@ -188,16 +190,17 @@ describe('SchemaCatalog.fromFragments', () => {
             @RangeIndex() @Unique() declare email: string;
             @RangeIndex() declare handle: string;
         }
-        expect(SchemaCatalog.fromFragments(undefined, Admin).items).toHaveLength(3);
+        expect(SchemaCatalog.fromFragments(undefined, Admin).items).toHaveLength(4);
         expect(SchemaCatalog.fromFragments(undefined, Admin).items).toEqual(
             expect.arrayContaining([
+                { kind: 'RANGE', label: 'Admin', properties: ['id'] },
                 { kind: 'RANGE', label: 'Admin', properties: ['email'] },
                 { kind: 'UNIQUE', label: 'Admin', properties: ['email'], nodeIdProperty: 'id' },
                 { kind: 'RANGE', label: 'Admin', properties: ['handle'] }
             ])
         );
-        // The superclass keeps its own, each of them.
-        expect(SchemaCatalog.fromFragments(undefined, Account).items).toHaveLength(4);
+        // The superclass keeps its own, each of them, and its @NodeId's.
+        expect(SchemaCatalog.fromFragments(undefined, Account).items).toHaveLength(5);
     });
 
     it("should read the class's own declarations by kind, each as written, then each field's by its name", () => {
@@ -208,6 +211,8 @@ describe('SchemaCatalog.fromFragments', () => {
             // By the field's name, alpha, as drivine4j sorts its Kotlin properties, not by the graph's, zeta.
             rangeIndex('Ordered', 'zeta'),
             rangeIndex('Ordered', 'gamma'),
+            // The @NodeId's, after the indexes declared, as drivine4j gives it.
+            rangeIndex('Ordered', 'id'),
             uniquenessConstraint('Ordered', ['a', 'b'], { nodeIdProperty: 'id' }),
             uniquenessConstraint('Ordered', 'beta', { nodeIdProperty: 'id' })
         ]);
@@ -261,5 +266,131 @@ describe('SchemaCatalog.fromFragments', () => {
         const versioned = base.withVersion('model-2').forDatabases('a', 'b');
         expect([base.version, base.databases]).toEqual([undefined, undefined]);
         expect([versioned.version, versioned.databases]).toEqual(['model-2', ['a', 'b']]);
+    });
+});
+
+@NodeFragment({ labels: ['Note'] })
+class NoteNode {
+    @NodeId() id: string;
+    @RangeIndex({ properties: ['sessionId', 'createdAt'] }) sessionId: string;
+}
+
+@NodeFragment({ labels: ['Note'] })
+class OtherNoteNode {
+    @NodeId() id: string;
+}
+
+@NodeFragment({ labels: ['Unindexed'], nodeIdIndex: false })
+class UnindexedIdNode {
+    @NodeId() id: string;
+}
+
+@NodeFragment({ labels: ['Ticket'] })
+class TicketNode {
+    @NodeId() @GraphProperty('ticket_id') id: string;
+}
+
+@NodeFragment({ labels: ['Folded'] })
+class FoldedIdNode {
+    @NodeId() @CaseInsensitive() @RangeIndex({ ignoreCase: true }) id: string;
+}
+
+describe("SchemaCatalog.fromFragments, a fragment's @NodeId's range index (#800)", () => {
+    const noteId = rangeIndex('Note', 'id');
+
+    it('should give a @NodeId a range index under the primary label, over the property it is stored under', () => {
+        const note = SchemaCatalog.fromFragments(undefined, NoteNode);
+        expect(note.nodeIdIndexes).toEqual([noteId]);
+        expect(note.items).toContainEqual(noteId);
+        // @GraphProperty: the property the id is stored under.
+        expect(SchemaCatalog.fromFragments(undefined, TicketNode).nodeIdIndexes).toEqual([
+            rangeIndex('Ticket', 'ticket_id')
+        ]);
+        // Under the first label, of a fragment of two.
+        expect(SchemaCatalog.fromFragments(undefined, OrderedNode).nodeIdIndexes).toEqual([
+            rangeIndex('Ordered', 'id')
+        ]);
+    });
+
+    it('should give a fragment without a @NodeId, or one that opts out, no range index for it', () => {
+        expect(SchemaCatalog.fromFragments(undefined, NoIdNode).nodeIdIndexes).toEqual([]);
+        const unindexed = SchemaCatalog.fromFragments(undefined, UnindexedIdNode);
+        expect(unindexed.nodeIdIndexes).toEqual([]);
+        expect(unindexed.items).toEqual([]);
+    });
+
+    it("should give a subclass the index unless it opts out too, as the option is the class's own", () => {
+        @NodeFragment({ labels: ['UnindexedChild'] })
+        class UnindexedChild extends UnindexedIdNode {}
+        expect(SchemaCatalog.fromFragments(undefined, UnindexedChild).nodeIdIndexes).toEqual([
+            rangeIndex('UnindexedChild', 'id')
+        ]);
+    });
+
+    it('should add none beside a range index or a uniqueness constraint declared over the @NodeId alone', () => {
+        // MessageNode's @NodeId is @Unique, which serves it.
+        expect(SchemaCatalog.fromFragments(() => 4, MessageNode).nodeIdIndexes).toEqual([]);
+        @NodeFragment({ labels: ['RangedId'] })
+        class RangedId {
+            @NodeId() @RangeIndex() id: string;
+        }
+        const ranged = SchemaCatalog.fromFragments(undefined, RangedId);
+        expect([ranged.nodeIdIndexes, ranged.items]).toEqual([[], [rangeIndex('RangedId', 'id')]]);
+    });
+
+    it('should add one beside an item over more properties, or one that ignores case', () => {
+        expect(SchemaCatalog.fromFragments(undefined, FoldedIdNode).nodeIdIndexes).toEqual([
+            rangeIndex('Folded', 'id')
+        ]);
+        @NodeFragment({ labels: ['Composite'] })
+        @RangeIndex({ properties: ['id', 'at'] })
+        class Composite {
+            @NodeId() id: string;
+            at: number;
+        }
+        expect(SchemaCatalog.fromFragments(undefined, Composite).nodeIdIndexes).toEqual([
+            rangeIndex('Composite', 'id')
+        ]);
+    });
+
+    it('should give two fragments of one label one range index, and withoutNodeIdIndexes only what is declared', () => {
+        const both = SchemaCatalog.fromFragments(undefined, NoteNode, OtherNoteNode);
+        expect(both.items.filter((it) => JSON.stringify(it) === JSON.stringify(noteId))).toHaveLength(1);
+        const declared = both.withoutNodeIdIndexes();
+        expect(declared.nodeIdIndexes).toEqual([]);
+        expect(declared.items).toEqual(both.declaredItems);
+        expect(declared.items).toHaveLength(both.items.length - 1);
+        expect(declared.items).not.toContainEqual(noteId);
+        // The defaults survive a copy, and the copy keeps the rest.
+        const copied = both.forDatabase('x').withVersion('1').named('app');
+        expect(copied.nodeIdIndexes).toEqual(both.nodeIdIndexes);
+        const without = copied.withoutNodeIdIndexes();
+        expect([without.databases, without.version, without.name]).toEqual([['x'], '1', 'app']);
+    });
+
+    it("should leave out a default another catalog's item serves where they are applied, and keep one it doesn't", () => {
+        const fragments = SchemaCatalog.fromFragments(undefined, NoteNode);
+        const named = { ...rangeIndex('Note', 'id'), name: 'note_id' };
+        for (const other of [
+            SchemaCatalog.of(named).named('app'),
+            SchemaCatalog.of(uniquenessConstraint('Note', 'id'))
+        ]) {
+            const beside = fragments.itemsBeside([...fragments.declaredItems, ...other.declaredItems]);
+            expect(beside).not.toContainEqual(noteId);
+            expect(beside).toHaveLength(fragments.items.length - 1);
+        }
+        const composite = SchemaCatalog.of(rangeIndex('Note', ['id', 'sessionId']));
+        expect(fragments.itemsBeside([...fragments.declaredItems, ...composite.declaredItems])).toEqual(
+            fragments.items
+        );
+        const folded = SchemaCatalog.of(rangeIndex('Note', 'id', { ignoreCase: true }));
+        expect(fragments.itemsBeside([...fragments.declaredItems, ...folded.declaredItems])).toEqual(fragments.items);
+        // Another catalog's own default serves nothing: two catalogs of the fragment both keep theirs, as one item.
+        expect(fragments.itemsBeside([...fragments.declaredItems, ...fragments.declaredItems])).toEqual(
+            fragments.items
+        );
+        // One declared the same is the same item, co-owned: kept, so the owner's marker doesn't call it an orphan.
+        const same = SchemaCatalog.of(rangeIndex('Note', 'id')).named('app');
+        expect(fragments.itemsBeside([...fragments.declaredItems, ...same.declaredItems])).toEqual(fragments.items);
     });
 });
