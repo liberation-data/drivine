@@ -306,6 +306,43 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
         ]);
     });
 
+    it("should list a label's range properties as one item each its own index where the engine indexes so", async () => {
+        const listed = jest.spyOn(NodeIdIndexCheck, 'listed');
+        DatabaseRegistry.tearDown();
+        DatabaseRegistry.getInstance().register({ name: 'falkor', type: DatabaseType.FALKORDB } as ConnectionProvider);
+        try {
+            await new SchemaManager(factory, {
+                catalogs: [SchemaCatalog.fromFragments(undefined, SessionFixture)]
+            }).enforce();
+        } finally {
+            DatabaseRegistry.tearDown();
+            DatabaseRegistry.getInstance().register({ name: 'graph', type: DatabaseType.NEO4J } as ConnectionProvider);
+        }
+        expect(listed.mock.calls.map(([database, , perProperty]) => [database, perProperty])).toEqual([
+            ['falkor', true]
+        ]);
+    });
+
+    it('should keep what an enforce listed current from an index or a constraint ensured or recreated by hand', async () => {
+        const ensured = jest.spyOn(NodeIdIndexCheck, 'ensured');
+        const made = (written: Record<string, any>) => ({
+            ...planning,
+            plan: { ...planning.plan, run: async () => Promise.resolve({ item: { result: written, dropped: null } }) }
+        });
+        const order = rangeIndex('Order', 'id');
+        const invoice = uniquenessConstraint('Invoice', 'invoice_no');
+        await new IndexManager(made({ created: {} }) as any).ensure(order);
+        await new IndexManager(made({ recreated: {} }) as any).recreate(order);
+        await new ConstraintManager(made({ alreadyMatching: {} }) as any).ensure(invoice);
+        await new ConstraintManager(made({ recreated: {} }) as any).recreate(invoice);
+        expect(ensured.mock.calls.map(([database, spec, result]) => [database, spec, result.status])).toEqual([
+            ['graph', order, 'CREATED'],
+            ['graph', order, 'RECREATED'],
+            ['graph', invoice, 'ALREADY_MATCHING'],
+            ['graph', invoice, 'RECREATED']
+        ]);
+    });
+
     it('should pass over a listing that fails, so the enforce still succeeds', async () => {
         jest.spyOn(IndexManager.prototype, 'list').mockRejectedValue(new Error('no listing'));
         const listed = jest.spyOn(NodeIdIndexCheck, 'listed');

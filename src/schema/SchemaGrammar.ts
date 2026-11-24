@@ -488,6 +488,15 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     }
 };
 
+/** Whether the engine indexes properties one by one; false where it has no schema grammar to say. */
+export function rangesPerProperty(type: DatabaseType): boolean {
+    try {
+        return !!schemaGrammarFor(type).rangesPerProperty;
+    } catch {
+        return false;
+    }
+}
+
 /** The schema grammar of an engine; on Oracle, Postgres and SQLite, over `graph` (the default graph unless given). */
 export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGrammar {
     switch (type) {

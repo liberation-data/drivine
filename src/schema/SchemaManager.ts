@@ -9,7 +9,7 @@ import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
 import { NodeIdIndexCheck } from '@/schema/NodeIdIndexCheck';
 import { IndexManager } from '@/schema/IndexManager';
 import { ConstraintManager } from '@/schema/ConstraintManager';
-import { schemaGrammarFor } from '@/schema/SchemaGrammar';
+import { rangesPerProperty } from '@/schema/SchemaGrammar';
 import { EnsureResult, itemName, madeAs } from '@/schema/SchemaSpecs';
 import {
     DEFAULT_BUILD_TIMEOUT,
@@ -318,11 +318,7 @@ export class SchemaManager {
     /** Whether `database`'s engine lists a label's range properties as one item, each its own index (FalkorDB). */
     private rangesPerProperty(database: string): boolean {
         const type = DatabaseRegistry.getInstance().connectionProvider(database)?.type;
-        try {
-            return type !== undefined && !!schemaGrammarFor(type).rangesPerProperty;
-        } catch {
-            return false;
-        }
+        return type !== undefined && rangesPerProperty(type);
     }
 
     /** The plan request of `operation` on `database`: the startup catalogs for it, and the runtime items there. */
