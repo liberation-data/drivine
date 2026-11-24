@@ -293,6 +293,28 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
         expect(itemsOf(requests[requests.length - 1])).toEqual([[]]);
     });
 
+    it('should leave out a default only on the databases the item that serves it is declared or ensured on', async () => {
+        DatabaseRegistry.getInstance().register({ name: 'other', type: DatabaseType.NEO4J } as ConnectionProvider);
+        try {
+            const fragments = SchemaCatalog.fromFragments(undefined, SessionFixture);
+            const served = SchemaCatalog.of(uniquenessConstraint('Session', 'id')).named('app').forDatabase('other');
+            await new SchemaManager(factory, { catalogs: [fragments, served] }).enforce();
+            // In order of database name: 'graph', then 'other'.
+            expect(requests.map(itemsOf)).toEqual([
+                [['RANGE_INDEX:Session:id']],
+                [[], ['UNIQUENESS_CONSTRAINT:Session:id']]
+            ]);
+            requests.length = 0;
+            const manager = new SchemaManager(factory, { catalogs: [fragments] });
+            await manager.ensure(served);
+            await manager.enforce();
+            expect(requests.slice(1).map(itemsOf)).toEqual([[['RANGE_INDEX:Session:id']], [[]]]);
+        } finally {
+            DatabaseRegistry.tearDown();
+            DatabaseRegistry.getInstance().register({ name: 'graph', type: DatabaseType.NEO4J } as ConnectionProvider);
+        }
+    });
+
     it('should apply the catalogs without their defaults where indexNodeIds is false', async () => {
         await new SchemaManager(factory, {
             catalogs: [SchemaCatalog.fromFragments(undefined, SessionFixture, RangedSessionFixture)],
