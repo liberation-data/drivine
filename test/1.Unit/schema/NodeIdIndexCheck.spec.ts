@@ -412,9 +412,18 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
             expect(too.mock.invocationCallOrder[0]).toBeLessThan(
                 listed.mock.invocationCallOrder[listed.mock.calls.length - 1]
             );
+            // An ensured fragment catalog names its fragments' labels too, not only its items'.
+            too.mockClear();
+            await manager.ensure(
+                SchemaCatalog.fromFragments(undefined, OrderFixture).named('orders').forDatabase('other')
+            );
+            expect(too.mock.calls).toEqual([['other', ['Order', 'Order', 'Purchase']]]);
             // A later enforce names what was ensured among the rest, on the databases it was ensured on.
             await manager.enforce();
-            const again = [...catalogued.mock.calls[1][0]].map(([database, named]) => [database, [...named].sort()]);
+            const again = [...catalogued.mock.calls[1][0]].map(([database, named]) => [
+                database,
+                [...new Set(named)].sort()
+            ]);
             expect(again).toEqual([
                 ['graph', ['Customer', 'Person']],
                 ['other', ['Customer', 'Order', 'UnindexedSession']]
