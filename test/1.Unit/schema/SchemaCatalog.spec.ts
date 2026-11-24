@@ -351,6 +351,12 @@ describe("SchemaCatalog.fromFragments, a fragment's @NodeId's range index (#800)
         expect(SchemaCatalog.fromFragments(undefined, Composite).nodeIdIndexes).toEqual([
             rangeIndex('Composite', 'id')
         ]);
+        // Nor does an index of another kind over the id alone: a lookup by it reads no full-text index.
+        @NodeFragment({ labels: ['Searched'] })
+        class Searched {
+            @NodeId() @FullTextIndex() id: string;
+        }
+        expect(SchemaCatalog.fromFragments(undefined, Searched).nodeIdIndexes).toEqual([rangeIndex('Searched', 'id')]);
     });
 
     it('should give two fragments of one label one range index, and withoutNodeIdIndexes only what is declared', () => {

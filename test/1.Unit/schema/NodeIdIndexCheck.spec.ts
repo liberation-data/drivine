@@ -3,6 +3,7 @@ import {
     ConstraintManager,
     DatabaseRegistry,
     DatabaseType,
+    fullTextIndex,
     GraphObjectManagerFactory,
     GraphProperty,
     IndexManager,
@@ -139,12 +140,14 @@ describe('NodeIdIndexCheck', () => {
         use(OrderFixture);
         expect(warnings).toEqual([]);
 
-        // One that ignores case, over more properties, not made, or on a database no enforce listed.
+        // One that ignores case, of another kind, over more properties, not made, or on a database no enforce listed.
         NodeIdIndexCheck.reset();
         NodeIdIndexCheck.managed();
         NodeIdIndexCheck.listed('default', []);
         const folded = rangeIndex('Order', 'id', { ignoreCase: true });
         NodeIdIndexCheck.ensured('default', folded, { status: 'CREATED', spec: folded });
+        const searched = fullTextIndex('Order', 'id');
+        NodeIdIndexCheck.ensured('default', searched, { status: 'CREATED', spec: searched });
         const wider = rangeIndex('Order', ['id', 'placedAt']);
         NodeIdIndexCheck.ensured('default', wider, { status: 'CREATED', spec: wider });
         NodeIdIndexCheck.ensured('default', order, { status: 'DRIFT', spec: order });
