@@ -30,8 +30,9 @@ The site at [drivine.org](https://drivine.org/), built with
 - `src/components/Playground.astro`: the Cypher playground, Drivine running in the page on SQLite's wasm build, with a
   small movies graph and example queries (`src/playground/movies.ts`), at `/playground/` (`src/pages/playground.astro`).
   The landing page's "Try it in your browser" opens it in a tab of its own (`TRY_IN_BROWSER` in `src/pages/index.astro`).
-  Under it, `src/components/StudioPanel.astro` says what Drivine Studio adds, each claim from Studio's README; its link,
-  like the landing page's links to get Studio, is `STUDIO_GET` in `src/lib/github.ts`. Its engine,
+  Under it, `src/components/StudioPanel.astro` says what Drivine Studio adds, each claim from Studio's README; it links
+  to the landing page's download buttons, which `studioRelease()` in `src/lib/github.ts` fills from the latest Studio
+  release each build (falling back, like Windows, to `STUDIO_GET`, the steps to build from source). Its engine,
   `src/playground/engine.ts`, is bundled into `public/playground/` with Drivine from this repository's `src/`, and with
   SQLite's and the shared Cypher compiler's .wasm files from the root's `node_modules`, by
   `scripts/bundle-playground.mjs`, which `npm run dev` and `npm run build` run (so `npm ci` at the root first). The

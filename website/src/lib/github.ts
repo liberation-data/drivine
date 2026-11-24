@@ -15,10 +15,9 @@ export const STUDIO = { name: 'Drivine Studio', language: 'Desktop app', repo: '
 export const studioUrl = `https://github.com/${STUDIO.repo}`;
 
 /**
- * Where to get Drivine Studio, for the panels that ask the reader to try it. There are no published downloads yet, so it
- * is the README's steps to build the app on the machine that runs it. When signed downloads ship, point it at their page
- * and change the label, and the words around its links: "There are no downloads yet." in StudioPanel.astro, and the
- * landing page's "build it from source" and footer "Build it".
+ * Building Drivine Studio from source: the README's steps to build the app on the machine that runs it. It is the
+ * fallback when `studioRelease()` has no installer for the reader's platform — Windows has no packaged build — or when a
+ * build couldn't reach GitHub for the release.
  */
 export const STUDIO_GET = { url: `${studioUrl}#install-it-yourself`, label: 'Build it from source' } as const;
 
@@ -125,4 +124,69 @@ let train: Promise<Train | undefined> | undefined;
 export function releasedTrain(): Promise<Train | undefined> {
     train ??= fetchReleasedTrain().catch(() => undefined);
     return train;
+}
+
+/** One downloadable build of Drivine Studio: a short label for its button, where GitHub serves the file, and its size. */
+export interface Download {
+    label: string;
+    url: string;
+    size: string;
+}
+
+/** Drivine Studio's latest release: its version, its release page, and the per-platform installers attached to it. */
+export interface StudioRelease {
+    version: string;
+    url: string;
+    mac: { appleSilicon?: Download; intel?: Download };
+    linux: Download[];
+}
+
+interface Asset {
+    name: string;
+    size: number;
+    browser_download_url: string;
+}
+
+/** A GitHub asset's size the way a download link shows it: whole megabytes. */
+const megabytes = (bytes: number): string => `${Math.round(bytes / 1_000_000)} MB`;
+
+async function fetchStudioRelease(): Promise<StudioRelease | undefined> {
+    // `releases/latest` is GitHub's newest published, non-prerelease, non-draft release, so a draft or a pre-release
+    // build is never offered here.
+    const release = await githubJson(`repos/${STUDIO.repo}/releases/latest`);
+    const version = typeof release?.tag_name === 'string' ? release.tag_name.replace(/^v/, '') : undefined;
+    if (!version || typeof release.html_url !== 'string') {
+        return undefined;
+    }
+    const assets: Asset[] = Array.isArray(release.assets) ? release.assets : [];
+    const download = (match: (name: string) => boolean, label: string): Download | undefined => {
+        const asset = assets.find((a) => match(a.name));
+        return asset ? { label, url: asset.browser_download_url, size: megabytes(asset.size) } : undefined;
+    };
+    const mac = {
+        appleSilicon: download((name) => name.endsWith('.dmg') && name.includes('arm64'), 'Apple Silicon'),
+        intel: download((name) => name.endsWith('.dmg') && name.includes('x64'), 'Intel'),
+    };
+    const linux = [
+        download((name) => name.endsWith('.AppImage'), 'AppImage'),
+        download((name) => name.endsWith('.deb'), '.deb'),
+        download((name) => name.endsWith('.tar.gz'), 'tarball'),
+    ].filter((d): d is Download => d !== undefined);
+    // A release with no installer for any platform is no download: the page falls back to building from source.
+    if (!mac.appleSilicon && !mac.intel && linux.length === 0) {
+        return undefined;
+    }
+    return { version, url: release.html_url, mac, linux };
+}
+
+let studio: Promise<StudioRelease | undefined> | undefined;
+
+/**
+ * Drivine Studio's latest release and the installers it attached, fetched once per build, like the stars and the train:
+ * the visitor's browser never calls GitHub. If the fetch fails, or the release has no installers, there is none, and the
+ * page falls back to the README's steps to build it from source.
+ */
+export function studioRelease(): Promise<StudioRelease | undefined> {
+    studio ??= fetchStudioRelease().catch(() => undefined);
+    return studio;
 }
