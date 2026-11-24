@@ -178,9 +178,11 @@ drivine-python give the same index, so a store indexed by one is up to date for 
 
 A fragment never read into a `SchemaCatalog` gets none. A fragment whose `@NodeId` no index serves, under any of its
 labels, is warned of once per database, at WARN (set `DRIVINE_LOG_LEVEL=WARN` to see it), naming the label, the property
-and the fix: after an `enforce` (or `recreateAll`), from what it lists of the store, or, where no `SchemaManager` with a
-catalog is built, 30 seconds after the fragment's first use. The check never reads the store in a save, and never fails
-one.
+and the fix, and the database where there is more than one: after an `enforce` (or `recreateAll`), from what it lists of
+the store, or, where no `SchemaManager` with a catalog is built, 30 seconds after the fragment's first use. A fragment
+some catalog was read from (with `fromFragments`, its default index on or off), or under whose labels some catalog has
+an item, is checked only on the databases those catalogs are for, and any other on every database. The check never
+reads the store in a save, and never fails one.
 
 A vector index in a catalog over a fragment field that has no `@VectorIndex` fails too, naming the class, the field and
 the spec. Without the decorator FalkorDB stores the field as a plain list, and `loadNearest` finds no index for the

@@ -374,6 +374,19 @@ describe("SchemaCatalog.fromFragments, a fragment's @NodeId's range index (#800)
         expect([without.databases, without.version, without.name]).toEqual([['x'], '1', 'app']);
     });
 
+    it('should keep the labels of the fragments it was read from, whatever items it keeps (drivine4j#848)', () => {
+        // nodeIdIndex: false and nothing declared: no item, but the fragment's label is kept.
+        const unindexed = SchemaCatalog.fromFragments(undefined, UnindexedIdNode);
+        expect([unindexed.items, unindexed.fragmentLabels]).toEqual([[], ['Unindexed']]);
+        // Every label of each fragment, once.
+        const both = SchemaCatalog.fromFragments(() => 4, MessageNode, NoteNode, OtherNoteNode);
+        expect(both.fragmentLabels).toEqual(['Message', 'Mapped', 'Note']);
+        for (const copy of [both.withoutNodeIdIndexes(), both.forDatabase('a'), both.named('app').withVersion('1')]) {
+            expect(copy.fragmentLabels).toEqual(both.fragmentLabels);
+        }
+        expect(SchemaCatalog.of(rangeIndex('Topic', 'name')).fragmentLabels).toEqual([]);
+    });
+
     it("should leave out a default another catalog's item serves where they are applied, and keep one it doesn't", () => {
         const fragments = SchemaCatalog.fromFragments(undefined, NoteNode);
         const named = { ...rangeIndex('Note', 'id'), name: 'note_id' };

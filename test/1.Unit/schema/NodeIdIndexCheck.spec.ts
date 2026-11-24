@@ -48,6 +48,9 @@ const ORDER_WARNING =
     "is off (@NodeFragment({ nodeIdIndex: false }) / indexNodeIds: false, or OrderFixture isn't in a SchemaCatalog): " +
     "declare @RangeIndex or @Unique on it, or indexes.ensure(rangeIndex('Order', 'id')).";
 
+/** The words a warning ends with where there is more than one database: the one it is said of (drivine4j#848). */
+const on = (database: string): string => ` On database '${database}'.`;
+
 /** The warning of a fragment whose @NodeId no index serves (#800, drivine4j#828): once per fragment and database. */
 describe('NodeIdIndexCheck', () => {
     let warnings: string[];
@@ -66,6 +69,58 @@ describe('NodeIdIndexCheck', () => {
         NodeIdIndexCheck.reset();
     });
 
+    it('should check a fragment some catalog names only on the databases whose catalogs name it, naming the database', () => {
+        NodeIdIndexCheck.managed();
+        use(OrderFixture);
+        use(InvoiceFixture);
+        // Order's catalog is for a alone, Invoice's for b alone; neither has its id indexed.
+        NodeIdIndexCheck.catalogued(
+            new Map([
+                ['a', ['Order']],
+                ['b', ['Invoice']]
+            ])
+        );
+        NodeIdIndexCheck.listed('a', []);
+        NodeIdIndexCheck.listed('b', []);
+        expect(warnings.filter((it) => it.includes('OrderFixture'))).toEqual([ORDER_WARNING + on('a')]);
+        expect(warnings.filter((it) => it.includes('InvoiceFixture') && it.endsWith(on('b')))).toHaveLength(1);
+        // Neither is warned of on the other's database.
+        expect(warnings).toHaveLength(2);
+    });
+
+    it('should check a fragment first used after the enforce only where it belongs, and where a later ensure names it', () => {
+        NodeIdIndexCheck.managed();
+        NodeIdIndexCheck.catalogued(
+            new Map([
+                ['a', ['Purchase']],
+                ['b', ['Invoice']]
+            ])
+        );
+        NodeIdIndexCheck.listed('a', []);
+        NodeIdIndexCheck.listed('b', []);
+        use(OrderFixture);
+        // Named on a under its other label, Purchase.
+        expect(warnings).toEqual([ORDER_WARNING + on('a')]);
+        // A catalog ensured on b at runtime names Order there, and b is listed again.
+        NodeIdIndexCheck.cataloguedToo('b', ['Order']);
+        NodeIdIndexCheck.listed('b', []);
+        expect(warnings).toEqual([ORDER_WARNING + on('a'), ORDER_WARNING + on('b')]);
+    });
+
+    it('should check a fragment no catalog names on every database listed', () => {
+        NodeIdIndexCheck.managed();
+        use(OrderFixture);
+        NodeIdIndexCheck.catalogued(
+            new Map([
+                ['a', ['Customer']],
+                ['b', []]
+            ])
+        );
+        NodeIdIndexCheck.listed('a', []);
+        NodeIdIndexCheck.listed('b', []);
+        expect(warnings).toEqual([ORDER_WARNING + on('a'), ORDER_WARNING + on('b')]);
+    });
+
     it("should warn of a fragment no index serves once per database, in drivine4j's words", () => {
         NodeIdIndexCheck.managed();
         use(OrderFixture);
@@ -74,7 +129,8 @@ describe('NodeIdIndexCheck', () => {
         use(OrderFixture);
         expect(warnings).toEqual([ORDER_WARNING]);
         NodeIdIndexCheck.listed('users', [range('Customer', 'id')]);
-        expect(warnings).toEqual([ORDER_WARNING, ORDER_WARNING]);
+        // Another database, whose index is under a label the fragment hasn't: named, as there are two.
+        expect(warnings).toEqual([ORDER_WARNING, ORDER_WARNING + on('users')]);
         // An index under any of the fragment's labels serves it: a save matches all of them.
         NodeIdIndexCheck.listed('archive', [range('Purchase', 'id')]);
         expect(warnings).toHaveLength(2);
@@ -88,7 +144,7 @@ describe('NodeIdIndexCheck', () => {
         expect(warnings).toEqual([]);
         // An item over more properties serves no lookup by the id alone.
         NodeIdIndexCheck.listed('c', [range('Order', 'id', 'placedAt'), unique('Order', 'id', 'line')]);
-        expect(warnings).toEqual([ORDER_WARNING]);
+        expect(warnings).toEqual([ORDER_WARNING + on('c')]);
     });
 
     it("should take a label's range properties listed as one item as serving, where the engine indexes each alone", () => {
@@ -98,7 +154,7 @@ describe('NodeIdIndexCheck', () => {
         NodeIdIndexCheck.listed('falkor', [range('Order', 'placedAt', 'id')], true);
         expect(warnings).toEqual([]);
         NodeIdIndexCheck.listed('neo', [range('Order', 'placedAt', 'id')]);
-        expect(warnings).toEqual([ORDER_WARNING]);
+        expect(warnings).toEqual([ORDER_WARNING + on('neo')]);
         // A constraint over more properties is still one over them all.
         NodeIdIndexCheck.listed('falkor2', [unique('Order', 'id', 'line')], true);
         expect(warnings).toHaveLength(2);
@@ -232,6 +288,11 @@ class RangedSessionFixture {
     @NodeId() @RangeIndex() id: string;
 }
 
+@NodeFragment({ labels: ['UnindexedSession'], nodeIdIndex: false })
+class UnindexedSessionFixture {
+    @NodeId() id: string;
+}
+
 /** What SchemaManager gives the planner of a fragment's @NodeId's default index, and lists for the check. */
 describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => {
     const requests: PlanRequest[] = [];
@@ -312,6 +373,39 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
             await manager.ensure(served);
             await manager.enforce();
             expect(requests.slice(1).map(itemsOf)).toEqual([[['RANGE_INDEX:Session:id']], [[]]]);
+        } finally {
+            DatabaseRegistry.tearDown();
+            DatabaseRegistry.getInstance().register({ name: 'graph', type: DatabaseType.NEO4J } as ConnectionProvider);
+        }
+    });
+
+    it("should give the check each database's catalogued labels before it lists, and an ensured catalog's after", async () => {
+        DatabaseRegistry.getInstance().register({ name: 'other', type: DatabaseType.NEO4J } as ConnectionProvider);
+        try {
+            const catalogued = jest.spyOn(NodeIdIndexCheck, 'catalogued');
+            const listed = jest.spyOn(NodeIdIndexCheck, 'listed');
+            const manager = new SchemaManager(factory, {
+                catalogs: [
+                    SchemaCatalog.of(rangeIndex('Person', 'name')).forDatabase('graph'),
+                    // A fragment read with its default off declares nothing: it belongs on 'other' all the same.
+                    SchemaCatalog.fromFragments(undefined, UnindexedSessionFixture).forDatabase('other'),
+                    SchemaCatalog.of(rangeIndex('Customer', 'id'))
+                ]
+            });
+            await manager.enforce();
+            expect(catalogued).toHaveBeenCalledTimes(1);
+            expect(catalogued.mock.invocationCallOrder[0]).toBeLessThan(listed.mock.invocationCallOrder[0]);
+            const labels = [...catalogued.mock.calls[0][0]].map(([database, named]) => [database, [...named].sort()]);
+            expect(labels).toEqual([
+                ['graph', ['Customer', 'Person']],
+                ['other', ['Customer', 'UnindexedSession']]
+            ]);
+            const too = jest.spyOn(NodeIdIndexCheck, 'cataloguedToo');
+            await manager.ensure(SchemaCatalog.of(rangeIndex('Order', 'at')).named('app').forDatabase('other'));
+            expect(too.mock.calls).toEqual([['other', ['Order']]]);
+            expect(too.mock.invocationCallOrder[0]).toBeLessThan(
+                listed.mock.invocationCallOrder[listed.mock.calls.length - 1]
+            );
         } finally {
             DatabaseRegistry.tearDown();
             DatabaseRegistry.getInstance().register({ name: 'graph', type: DatabaseType.NEO4J } as ConnectionProvider);

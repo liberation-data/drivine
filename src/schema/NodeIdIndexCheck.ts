@@ -15,7 +15,8 @@ export type ListedItem = Pick<SchemaItem, 'label' | 'properties'> & { kind: 'RAN
  * Nothing here reads the store while a fragment is used, nor throws: a check that fails is passed over, and the save or
  * load goes on. What serves an id is what SchemaManager's `enforce` (or `recreateAll`) listed of each database
  * (`listed`), after it applied the catalogs, kept current by each ensure after it (`ensured`). A fragment used before an
- * enforce is checked when it runs, and one first used after it against what it listed. Where no SchemaManager with a
+ * enforce is checked when it runs, and one first used after it against what it listed, each only on the databases where
+ * it belongs (`catalogued`, drivine4j#848). Where no SchemaManager with a
  * catalog has been built, nothing applies one; as one may yet be, as an application starts, a fragment is warned of
  * only if none has been UNMANAGED_DELAY_MILLIS after its first use.
  *
@@ -38,6 +39,14 @@ export class NodeIdIndexCheck {
 
     /** Whether a SchemaManager with a catalog has been built, which applies catalogs and lists what serves an id. */
     private static managedSince = false;
+
+    /**
+     * The labels the catalogs a SchemaManager applies declare items of, or were read from, by database, given before its
+     * enforce lists any: a fragment whose labels some catalog names is checked only on the databases where one does, as
+     * it belongs there, and is not warned of on another it is never used on (drivine4j#848). A fragment no catalog names
+     * is checked on every database listed.
+     */
+    private static cataloguedLabels = new Map<string, Set<string>>();
 
     /** What `reset` last set: a timer set under another does nothing. */
     private static generation = 0;
@@ -80,6 +89,16 @@ export class NodeIdIndexCheck {
         });
     }
 
+    /** What the catalogs on each database name, as `cataloguedLabels` keeps it: given by SchemaManager before it lists. */
+    static catalogued(labels: Map<string, Iterable<string>>): void {
+        this.cataloguedLabels = new Map([...labels].map(([database, named]) => [database, new Set(named)]));
+    }
+
+    /** `labels` are named on `database` too, by a catalog SchemaManager's `ensure` gave after the enforce. */
+    static cataloguedToo(database: string, labels: Iterable<string>): void {
+        this.cataloguedLabels.set(database, new Set([...(this.cataloguedLabels.get(database) ?? []), ...labels]));
+    }
+
     /** Whether an enforce has listed `database`, whose listing a runtime ensure is to keep current. */
     static listedOn(database: string): boolean {
         return this.served.has(database);
@@ -118,6 +137,7 @@ export class NodeIdIndexCheck {
         this.admitted.clear();
         this.served.clear();
         this.warned.clear();
+        this.cataloguedLabels = new Map();
         this.managedSince = false;
     }
 
@@ -128,12 +148,24 @@ export class NodeIdIndexCheck {
         (timer as { unref?: () => void }).unref?.();
     }
 
+    /** Whether `model` is checked on `database`: no catalog names its labels, or one on `database` does. */
+    private static belongs(database: string, model: FragmentModel): boolean {
+        const named = [...this.cataloguedLabels.values()];
+        if (!model.labels.some((label) => named.some((it) => it.has(label)))) {
+            return true;
+        }
+        return model.labels.some((label) => this.cataloguedLabels.get(database)?.has(label));
+    }
+
     /**
      * Warns of `model` where no index `serving` is over its @NodeId under any of its labels: a save and a load by id match
      * every label of the fragment, so an index under any of them answers it.
      */
     private static check(database: string, model: FragmentModel, serving: Set<string>): void {
         const property = model.nodeIdProperty!;
+        if (!this.belongs(database, model)) {
+            return;
+        }
         if (!model.labels.some((label) => serving.has(key(label, property)))) {
             this.warn(database, model);
         }
@@ -156,7 +188,11 @@ export class NodeIdIndexCheck {
             `@NodeId '${property}' of ${fragment} has no index under :${label}, so each save scans every :${label} node. ` +
                 `Its default index is off (@NodeFragment({ nodeIdIndex: false }) / indexNodeIds: false, or ${fragment} ` +
                 `isn't in a SchemaCatalog): declare @RangeIndex or @Unique on it, or ` +
-                `indexes.ensure(rangeIndex('${label}', '${property}')).`
+                `indexes.ensure(rangeIndex('${label}', '${property}')).` +
+                // Where there is more than one database, the one it is said of.
+                (database && (this.cataloguedLabels.size > 1 || this.served.size > 1)
+                    ? ` On database '${database}'.`
+                    : '')
         );
     }
 

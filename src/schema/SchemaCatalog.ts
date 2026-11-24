@@ -128,7 +128,8 @@ export class SchemaCatalog {
             undefined,
             undefined,
             DEFAULT_SCOPE,
-            unserved
+            unserved,
+            [...new Set(types.flatMap((type) => registry.fragment(type as ClassType).labels))]
         );
     }
 
@@ -147,21 +148,48 @@ export class SchemaCatalog {
          * The range indexes among `items` that fragments' @NodeIds are given by default (`fromFragments`): each one no
          * item declared serves. `withoutNodeIdIndexes` leaves them out.
          */
-        readonly nodeIdIndexes: readonly SchemaSpec[] = []
+        readonly nodeIdIndexes: readonly SchemaSpec[] = [],
+        /**
+         * The labels of the fragments it was read from (`fromFragments`), kept whatever items it keeps, as with its
+         * default indexes left out: where a fragment belongs, so that the warning of an unindexed @NodeId is given on the
+         * databases its catalog is for, and not on another it is never used on (drivine4j#848).
+         */
+        readonly fragmentLabels: readonly string[] = []
     ) {}
 
     withVersion(version: string): SchemaCatalog {
-        return new SchemaCatalog(this.items, version, this.databases, this.name, this.nodeIdIndexes);
+        return new SchemaCatalog(
+            this.items,
+            version,
+            this.databases,
+            this.name,
+            this.nodeIdIndexes,
+            this.fragmentLabels
+        );
     }
 
     /** Records its version and inventory under this owner, so that owners version apart. */
     named(name: string): SchemaCatalog {
-        return new SchemaCatalog(this.items, this.version, this.databases, name, this.nodeIdIndexes);
+        return new SchemaCatalog(
+            this.items,
+            this.version,
+            this.databases,
+            name,
+            this.nodeIdIndexes,
+            this.fragmentLabels
+        );
     }
 
     /** Applies only to the databases named ('default' being the first registered). Replaces earlier targets. */
     forDatabases(...databases: string[]): SchemaCatalog {
-        return new SchemaCatalog(this.items, this.version, databases, this.name, this.nodeIdIndexes);
+        return new SchemaCatalog(
+            this.items,
+            this.version,
+            databases,
+            this.name,
+            this.nodeIdIndexes,
+            this.fragmentLabels
+        );
     }
 
     /**
@@ -169,7 +197,7 @@ export class SchemaCatalog {
      * declared: as SchemaOptions' `indexNodeIds: false` gives a manager its catalogs.
      */
     withoutNodeIdIndexes(): SchemaCatalog {
-        return new SchemaCatalog(this.declaredItems, this.version, this.databases, this.name);
+        return new SchemaCatalog(this.declaredItems, this.version, this.databases, this.name, [], this.fragmentLabels);
     }
 
     /** `items` without the defaults of `nodeIdIndexes`: what is declared. */

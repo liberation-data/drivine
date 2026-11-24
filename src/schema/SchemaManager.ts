@@ -93,6 +93,12 @@ const asCatalog = (it: RuntimeCatalog): PlanRequest['runtime'][number] => ({
     items: it.items
 });
 
+/** The labels a catalog names: those of its items, and of the fragments it was read from, whatever items it keeps. */
+const labelsOf = (catalog: SchemaCatalog): string[] => [
+    ...catalog.items.map((it) => it.label),
+    ...catalog.fragmentLabels
+];
+
 /** The planner of no store's statements, which validates what every store's would: drivine4j's `VALIDATOR`. */
 const VALIDATOR = new SchemaPlan('neo4j', undefined);
 
@@ -214,6 +220,8 @@ export class SchemaManager {
                 results.set(database, this.results(await planning.plan.run(request, planning.host)));
                 // What an enforce listed is kept current, so a fragment first used after this isn't warned of.
                 if (NodeIdIndexCheck.listedOn(database)) {
+                    // Its labels are named on the database from then on, so a fragment under one is checked there too.
+                    NodeIdIndexCheck.cataloguedToo(database, labelsOf(catalog));
                     await this.listForNodeIds(database, planning);
                 }
             }
@@ -287,7 +295,17 @@ export class SchemaManager {
             return report;
         }
         VectorAnnotationCheck.register(all);
-        for (const database of this.databases(all)) {
+        const databases = this.databases(all);
+        // Before any is listed: a fragment is checked on the databases whose catalogs name its labels (drivine4j#848).
+        NodeIdIndexCheck.catalogued(
+            new Map(
+                databases.map((database) => [
+                    database,
+                    all.filter((it) => this.databases([it]).includes(database)).flatMap(labelsOf)
+                ])
+            )
+        );
+        for (const database of databases) {
             const planning = this.factory.get(database).schemaPlanning();
             report.set(
                 database,
