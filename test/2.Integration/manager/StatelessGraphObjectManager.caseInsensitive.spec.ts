@@ -80,7 +80,8 @@ class CiMember {
     @CaseInsensitive() email?: string;
 }
 
-@NodeFragment({ labels: [MARKED] })
+// Without its @NodeId's default index, which a label made each run would leave behind: the inventory is the one item.
+@NodeFragment({ labels: [MARKED], nodeIdIndex: false })
 class CiMarked {
     @NodeId() id: string;
     @CaseInsensitive() @RangeIndex({ ignoreCase: true }) email?: string;
