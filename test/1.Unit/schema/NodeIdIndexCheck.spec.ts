@@ -344,6 +344,29 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
         ]);
     });
 
+    it("should give the check the store's range indexes and uniqueness constraints, each of its kind", async () => {
+        const listed = jest.spyOn(NodeIdIndexCheck, 'listed');
+        const ranges = jest
+            .spyOn(IndexManager.prototype, 'list')
+            .mockResolvedValue([{ label: 'Session', properties: ['id'] }]);
+        jest.spyOn(ConstraintManager.prototype, 'list').mockResolvedValue([
+            { label: 'Session', properties: ['id', 'at'] }
+        ]);
+        await new SchemaManager(factory, {
+            catalogs: [SchemaCatalog.fromFragments(undefined, SessionFixture)]
+        }).enforce();
+        expect(ranges).toHaveBeenCalledWith('RANGE');
+        expect(listed.mock.calls.map(([database, items]) => [database, items])).toEqual([
+            [
+                'graph',
+                [
+                    { kind: 'RANGE', label: 'Session', properties: ['id'] },
+                    { kind: 'UNIQUE', label: 'Session', properties: ['id', 'at'] }
+                ]
+            ]
+        ]);
+    });
+
     it('should keep what an enforce listed current from an index or a constraint ensured or recreated by hand', async () => {
         const ensured = jest.spyOn(NodeIdIndexCheck, 'ensured');
         const made = (written: Record<string, any>) => ({
