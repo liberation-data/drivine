@@ -1,3 +1,4 @@
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { DrivineLogger } from '@/logger';
 import type { FragmentModel } from '@/model/FragmentModel';
 import type { SchemaItem } from '@/schema/SchemaGrammar';
@@ -87,7 +88,8 @@ export class NodeIdIndexCheck {
     /**
      * `spec` was ensured or recreated on `database` with `result`, outside a SchemaManager: where an enforce listed the
      * database, an id it serves is served from then on, so a fragment first used after it isn't warned of. Nothing is
-     * read of the store.
+     * read of the store. `database` is a manager's, which may be 'default': it is taken as the database it names, as
+     * `listed` is given each under its registered name.
      */
     static ensured(database: string, spec: IndexSpec | UniquenessConstraintSpec, result: EnsureResult<any>): void {
         if (!['CREATED', 'ALREADY_MATCHING', 'RECREATED'].includes(result.status)) {
@@ -96,7 +98,8 @@ export class NodeIdIndexCheck {
         if ((spec.kind !== 'RANGE' && spec.kind !== 'UNIQUE') || spec.ignoreCase || spec.properties.length !== 1) {
             return;
         }
-        this.served.get(database)?.add(key(spec.label, spec.properties[0]));
+        const name = DatabaseRegistry.getInstance().connectionProvider(database)?.name ?? database;
+        this.served.get(name)?.add(key(spec.label, spec.properties[0]));
     }
 
     /** Warns of `type`, admitted under `generation`, where no SchemaManager has been built since. */

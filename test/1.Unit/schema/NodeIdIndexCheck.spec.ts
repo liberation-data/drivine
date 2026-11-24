@@ -156,6 +156,23 @@ describe('NodeIdIndexCheck', () => {
         expect(warnings).toEqual([ORDER_WARNING]);
     });
 
+    it("should take an item ensured through 'default' as ensured on the database it names", () => {
+        // SchemaManager lists a database under its registered name; `factory.get()`'s manager is of 'default'.
+        DatabaseRegistry.getInstance().register({ name: 'primary', type: DatabaseType.NEO4J } as ConnectionProvider);
+        try {
+            NodeIdIndexCheck.managed();
+            NodeIdIndexCheck.listed('primary', []);
+            NodeIdIndexCheck.ensured('default', rangeIndex('Order', 'id'), {
+                status: 'CREATED',
+                spec: rangeIndex('Order', 'id')
+            });
+            use(OrderFixture);
+        } finally {
+            DatabaseRegistry.tearDown();
+        }
+        expect(warnings).toEqual([]);
+    });
+
     it('should warn of a fragment later with no schema manager, and not where one was built by then', () => {
         jest.useFakeTimers();
         use(OrderFixture);
