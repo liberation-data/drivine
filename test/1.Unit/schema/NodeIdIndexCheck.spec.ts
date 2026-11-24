@@ -386,7 +386,8 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
             const listed = jest.spyOn(NodeIdIndexCheck, 'listed');
             const manager = new SchemaManager(factory, {
                 catalogs: [
-                    SchemaCatalog.of(rangeIndex('Person', 'name')).forDatabase('graph'),
+                    // 'default' is the first registered, graph: its labels are graph's.
+                    SchemaCatalog.of(rangeIndex('Person', 'name')).forDefaultDatabase(),
                     // A fragment read with its default off declares nothing: it belongs on 'other' all the same.
                     SchemaCatalog.fromFragments(undefined, UnindexedSessionFixture).forDatabase('other'),
                     SchemaCatalog.of(rangeIndex('Customer', 'id'))
