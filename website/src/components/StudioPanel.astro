@@ -1,9 +1,12 @@
 ---
 /**
- * "Want more? Try Drivine Studio": what Studio adds over the playground, under it on the /playground page. Each claim is in Studio's README (github.com/liberation-data/drivine-studio). The link is STUDIO_GET,
- * which turns into a download link when signed downloads ship.
+ * "Want more? Try Drivine Studio": what Studio adds over the playground, under it on the /playground page. Each claim is in Studio's README (github.com/liberation-data/drivine-studio). When the latest release has
+ * installers the link points at the landing page's downloads; without them (or Windows) it is STUDIO_GET, the steps to build from source.
  */
-import { STUDIO_GET } from '../lib/github';
+import { STUDIO_GET, studioRelease } from '../lib/github';
+
+const studio = await studioRelease();
+const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 ---
 
 <aside class="studio-panel" aria-label="Drivine Studio">
@@ -22,7 +25,11 @@ import { STUDIO_GET } from '../lib/github';
         <li>It only reads, unless you let a connection write.</li>
     </ul>
     <p>
-        <a href={STUDIO_GET.url}>{STUDIO_GET.label} →</a> for macOS, Windows or Linux. There are no downloads yet.
+        {studio ? (
+            <Fragment><a href={`${base}#get-studio`}>Download Drivine Studio →</a> for macOS or Linux. The macOS builds are signed and notarized.</Fragment>
+        ) : (
+            <Fragment><a href={STUDIO_GET.url}>{STUDIO_GET.label} →</a> for macOS, Windows or Linux.</Fragment>
+        )}
     </p>
 </aside>
 

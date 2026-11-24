@@ -55,7 +55,7 @@ const SITE = 'https://drivine.org/';
 const VIDEO_SHARE = new URL('#watch', SITE).href;
 const SHARE_TEXT = 'Drivine: graph RAG on any database. Build AI apps on the database you already run.';
 
-import { REPOS, STUDIO, STUDIO_GET, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
+import { REPOS, STUDIO, STUDIO_GET, formatStars, releasedTrain, repoUrl, stars, starsOf, studioRelease, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
@@ -64,6 +64,9 @@ const starLabel = (count: number | undefined) => (count === undefined ? '' : for
 // The newest released train, named under the installs and versioning them: without one, neither, and the installs take
 // the latest of each.
 const train = await releasedTrain();
+// Drivine Studio's latest release and the installers it attached, for the download buttons in the Studio section. None,
+// and that section falls back to building from source.
+const studio = await studioRelease();
 const drivine4jVersion = train?.libraries.drivine4j ?? '<version>';
 // The hero's installs, each pinned to the train's version of its library, so the three copied together work together.
 const pinned = (library: string, at: string) => (train?.libraries[library] ? `${at}${train.libraries[library]}` : '');
@@ -366,6 +369,28 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .studio img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 18px 40px rgba(2, 28, 38, 0.14); }
             .studio figcaption { font-size: 15px; line-height: 1.5; color: var(--muted); }
             .studio .note { margin: 0; font-size: 15px; color: #4a6670; }
+            .get-studio { display: flex; flex-direction: column; gap: 22px; }
+            .get-studio-head { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+            .get-studio-head strong { font-size: 20px; color: var(--ink); }
+            .get-studio-sub { font-size: 15px; line-height: 1.55; color: #4a6670; }
+            .downloads { display: flex; flex-wrap: wrap; gap: 28px 56px; }
+            .platform { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+            .platform h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal); }
+            .platform .arch { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
+            .dl-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+            .dl-button {
+                display: inline-flex; align-items: baseline; gap: 8px; padding: 11px 18px; border-radius: 10px;
+                border: 1.5px solid var(--line); background: #fff; color: var(--ink);
+                font-weight: 700; font-size: 16px; text-decoration: none; white-space: nowrap;
+            }
+            .dl-button:hover { border-color: var(--teal); color: var(--ink); }
+            .dl-button.primary { background: var(--accent); border-color: var(--accent); color: var(--ink); }
+            .dl-button.primary:hover { border-color: var(--accent); filter: brightness(1.06); }
+            .dl-meta { font-weight: 500; font-size: 13px; color: var(--muted); }
+            .dl-button.primary .dl-meta { color: #5a2f1a; }
+            .install-hint { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+            .install-hint code { font-size: 13px; background: var(--paper); padding: 1px 5px; border-radius: 4px; }
+            .from-source { margin: 0; font-size: 15px; color: #4a6670; }
 
             .backing { padding: 0 32px 72px; }
             .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
@@ -684,7 +709,48 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <Image src={studioCypher} widths={[800, 1572]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's desktop app on a Mac, its Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station China Town chosen and its properties shown beside the graph" />
                         <figcaption>Cypher on Postgres, compiled to SQL by Drivine: the metro network from <a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock ’n’ Roll Traffic Routing, with Neo4j</a>, now on any store. The station chosen is shown beside it.</figcaption>
                     </figure>
-                    <p class="note">Early days: <a href={STUDIO_GET.url}>build it from source</a> for macOS, Windows or Linux.</p>
+                    {studio ? (
+                        <div class="get-studio" id="get-studio">
+                            <p class="get-studio-head">
+                                <strong>Download Drivine Studio.</strong>
+                                <span class="get-studio-sub">Alpha {studio.version}. The macOS builds are signed and notarized — they open without a Gatekeeper prompt.</span>
+                            </p>
+                            <div class="downloads">
+                                {(studio.mac.appleSilicon || studio.mac.intel) && (
+                                    <div class="platform">
+                                        <h3>macOS</h3>
+                                        <div class="dl-buttons">
+                                            {studio.mac.appleSilicon && (
+                                                <a class="dl-button primary" href={studio.mac.appleSilicon.url}>
+                                                    Apple&nbsp;Silicon <span class="dl-meta">.dmg · {studio.mac.appleSilicon.size}</span>
+                                                </a>
+                                            )}
+                                            {studio.mac.intel && (
+                                                <a class="dl-button" href={studio.mac.intel.url}>
+                                                    Intel <span class="dl-meta">.dmg · {studio.mac.intel.size}</span>
+                                                </a>
+                                            )}
+                                        </div>
+                                        <p class="install-hint">Open the <code>.dmg</code> and drag Drivine Studio to Applications.</p>
+                                    </div>
+                                )}
+                                {studio.linux.length > 0 && (
+                                    <div class="platform">
+                                        <h3>Linux <span class="arch">(x64)</span></h3>
+                                        <div class="dl-buttons">
+                                            {studio.linux.map((d) => (
+                                                <a class="dl-button" href={d.url}>{d.label} <span class="dl-meta">{d.size}</span></a>
+                                            ))}
+                                        </div>
+                                        <p class="install-hint">Make the <code>.AppImage</code> executable and run it, or install the <code>.deb</code> with <code>dpkg -i</code>.</p>
+                                    </div>
+                                )}
+                            </div>
+                            <p class="from-source">On Windows, or want another build? <a href={STUDIO_GET.url}>Build it from source →</a></p>
+                        </div>
+                    ) : (
+                        <p class="note">Early days: <a href={STUDIO_GET.url}>build it from source</a> for macOS, Windows or Linux.</p>
+                    )}
                 </div>
             </section>
 
@@ -736,7 +802,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>TypeScript</span><a href="https://github.com/liberation-data/drivine">GitHub</a><a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a></div>
                     <div><span>Python</span><a href="https://github.com/liberation-data/drivine-python">GitHub</a><a href="https://pypi.org/project/drivine/">PyPI</a></div>
                     <div><span>JVM</span><a href="https://github.com/liberation-data/drivine4j">GitHub</a><a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a></div>
-                    <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={STUDIO_GET.url}>Build it</a></div>
+                    <div><span>Studio</span><a href={studioUrl}>GitHub</a>{studio ? <a href="#get-studio">Download</a> : <a href={STUDIO_GET.url}>Build it</a>}</div>
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
                 <Share tone="dark" label="Share Drivine" url={SITE} text={SHARE_TEXT} />
