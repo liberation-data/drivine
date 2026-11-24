@@ -126,6 +126,14 @@ describe('NodeIdIndexCheck', () => {
         expect(warnings).toEqual([ORDER_WARNING + on('a'), ORDER_WARNING + on('b')]);
     });
 
+    it('should not name the database where one alone is catalogued and listed', () => {
+        NodeIdIndexCheck.managed();
+        use(OrderFixture);
+        NodeIdIndexCheck.catalogued(new Map([['a', ['Order']]]));
+        NodeIdIndexCheck.listed('a', []);
+        expect(warnings).toEqual([ORDER_WARNING]);
+    });
+
     it("should warn of a fragment no index serves once per database, in drivine4j's words", () => {
         NodeIdIndexCheck.managed();
         use(OrderFixture);
