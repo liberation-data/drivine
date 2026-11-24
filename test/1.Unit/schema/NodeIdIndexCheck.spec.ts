@@ -188,14 +188,18 @@ describe('NodeIdIndexCheck', () => {
         jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
         expect(warnings).toEqual([]);
 
-        // A timer set before a reset does nothing after it.
+        // A timer set before a reset does nothing after it, though the class is admitted again and no manager built.
+        NodeIdIndexCheck.reset();
+        const half = NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS / 2;
+        use(OrderFixture);
+        jest.advanceTimersByTime(half);
         NodeIdIndexCheck.reset();
         use(OrderFixture);
-        NodeIdIndexCheck.reset();
-        use(InvoiceFixture);
-        NodeIdIndexCheck.managed();
-        jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
+        jest.advanceTimersByTime(half);
         expect(warnings).toEqual([]);
+        // The timer set after it warns.
+        jest.advanceTimersByTime(half);
+        expect(warnings).toEqual([ORDER_WARNING]);
     });
 
     it('should never warn of a fragment with no @NodeId', () => {
