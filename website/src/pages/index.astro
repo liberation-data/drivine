@@ -713,7 +713,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <div class="get-studio" id="get-studio">
                             <p class="get-studio-head">
                                 <strong>Download Drivine Studio.</strong>
-                                <span class="get-studio-sub">Alpha {studio.version}. The macOS builds are signed and notarized — they open without a Gatekeeper prompt.</span>
+                                <span class="get-studio-sub">Alpha {studio.version}.{(studio.mac.appleSilicon || studio.mac.intel) && ' The macOS builds are signed and notarized — they open without a Gatekeeper prompt.'}</span>
                             </p>
                             <div class="downloads">
                                 {(studio.mac.appleSilicon || studio.mac.intel) && (
