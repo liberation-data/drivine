@@ -161,6 +161,29 @@ startup. A catalog applies to every database that supports schema, unless you na
 `.forDefaultDatabase()`, `.forDatabase('users')` or `.forDatabases('a', 'b')`. A named target is strict: an unknown
 database, or one without schema support, fails startup.
 
+**A fragment's `@NodeId` gets a range index.** Each save, and each load by id, finds its node by the `@NodeId` property
+under the fragment's primary label, and with no index over it a store reads every node of the label. So `fromFragments`
+gives each fragment with a `@NodeId` a range index over that property, after the indexes it declares, unless an item
+declared serves it: a range index over that property alone, or a uniqueness constraint over it alone, neither ignoring
+case, from any fragment of the catalog, or any other catalog (or item given to `ensure`) the `SchemaManager` applies on
+that database. It is an item like any other, made by `enforce` and listed in the owner's marker. Once made, it stays when
+a `@Unique` is later declared on the id (reported as an orphan of its owner), and on Neo4j it is in the way of that
+constraint (`BLOCKED_BY_INDEX`): enforce once with `replaceBlockingIndex: true`, or drop the index first. drivine4j and
+drivine-python give the same index, so a store indexed by one is up to date for the others. To go without it:
+
+- one fragment: `@NodeFragment({ labels: ['Person'], nodeIdIndex: false })` (of that class alone: a subclass is given
+  the index unless it says so too);
+- one catalog: `SchemaCatalog.fromFragments(...).withoutNodeIdIndexes()`;
+- every catalog a manager is given: `schema: { catalogs, indexNodeIds: false }`.
+
+A fragment never read into a `SchemaCatalog` gets none. A fragment whose `@NodeId` no index serves, under any of its
+labels, is warned of once per database, at WARN (set `DRIVINE_LOG_LEVEL=WARN` to see it), naming the label, the property
+and the fix, and the database where there is more than one: after an `enforce` (or `recreateAll`), from what it lists of
+the store, or, where no `SchemaManager` with a catalog is built, 30 seconds after the fragment's first use. A fragment
+some catalog was read from (with `fromFragments`, its default index on or off), or under whose labels some catalog has
+an item, is checked only on the databases those catalogs are for, and any other on every database. The check never
+reads the store in a save, and never fails one.
+
 A vector index in a catalog over a fragment field that has no `@VectorIndex` fails too, naming the class, the field and
 the spec. Without the decorator FalkorDB stores the field as a plain list, and `loadNearest` finds no index for the
 fragment. Declare both when a catalog spec tunes the index. The check runs when `SchemaManager` applies the catalog, or
@@ -179,6 +202,7 @@ the default from target ES2022). A spec for a label no fragment maps, and one gi
 | `replaceBlockingIndex` | Destructive: drop a plain index in the way of a uniqueness constraint (Neo4j) and make the constraint in its place. |
 | `violationSampleSize` | How many keys held more than once a violation reports, and how many of each one's nodes; 0 reports none, though the data is still read to confirm a violation, which then has an empty sample. Defaults to 10. |
 | `enabled` | `false` skips the startup run; `SchemaManager` can still be injected. |
+| `indexNodeIds` | `false` applies the catalogs without the range index each fragment's `@NodeId` is given by default, leaving only what is declared. Defaults to `true`. |
 
 `SchemaManager` is injectable, to change the schema as the application runs: `enforce()` is safe to call again, and
 `recreateAll()` drops and remakes every declared item.

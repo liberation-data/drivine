@@ -30,7 +30,6 @@ import { SaveStatement } from '@/backend/SaveStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { DatabaseType } from '@/connection/DatabaseType';
 import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
 import { TransactionMode } from '@/connection/TransactionMode';
 import { NonAtomicBatchException } from '@/manager/NonAtomicBatchException';
@@ -44,7 +43,7 @@ import { lowered, loweredQuery, loweredWhere } from '@/dsl/LowerCopyLookups';
 import { scopeOf } from '@/dsl/ModelScope';
 import { FragmentModel } from '@/model/FragmentModel';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
-import { SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
+import { rangesPerProperty, SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
 import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
 import { SqliteBackend } from '@/backend/sqlite/SqliteBackend';
@@ -147,15 +146,6 @@ function filterOnly<T>(
         throw new DrivineError(`A ${what} takes a query's where, not an order, skip, limit or seek.`);
     }
     return options;
-}
-
-/** Whether the engine indexes properties one by one; false where it has no schema grammar to say. */
-function rangesPerProperty(type: DatabaseType): boolean {
-    try {
-        return !!schemaGrammarFor(type).rangesPerProperty;
-    } catch {
-        return false;
-    }
 }
 
 /** How many times `update` loads and applies its change before a stale save is thrown. */

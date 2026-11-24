@@ -6,6 +6,10 @@ import { DrivineLogger } from '@/logger';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { DEFAULT_SCOPE, SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
+import { NodeIdIndexCheck } from '@/schema/NodeIdIndexCheck';
+import { IndexManager } from '@/schema/IndexManager';
+import { ConstraintManager } from '@/schema/ConstraintManager';
+import { rangesPerProperty } from '@/schema/SchemaGrammar';
 import { EnsureResult, itemName, madeAs } from '@/schema/SchemaSpecs';
 import {
     DEFAULT_BUILD_TIMEOUT,
@@ -17,7 +21,8 @@ import {
     PlanRequest,
     planSpec,
     RuntimeCatalog,
-    SchemaPlan
+    SchemaPlan,
+    SchemaPlanning
 } from '@/schema/SchemaPlan';
 
 export interface SchemaOptions {
@@ -48,6 +53,12 @@ export interface SchemaOptions {
     violationSampleSize?: number;
     /** Whether DrivineModule enforces the schema at startup. Defaults to true. */
     enabled?: boolean;
+    /**
+     * Whether each fragment's @NodeId is given the range index `SchemaCatalog.fromFragments` gives it by default, unless
+     * an item declared serves it. Defaults to true; false gives the manager its catalogs without them
+     * (`withoutNodeIdIndexes`), leaving only what is declared.
+     */
+    indexNodeIds?: boolean;
 }
 
 const GRAPH_TYPES = [
@@ -82,6 +93,12 @@ const asCatalog = (it: RuntimeCatalog): PlanRequest['runtime'][number] => ({
     items: it.items
 });
 
+/** The labels a catalog names: those of its items, and of the fragments it was read from, whatever items it keeps. */
+const labelsOf = (catalog: SchemaCatalog): string[] => [
+    ...catalog.items.map((it) => it.label),
+    ...catalog.fragmentLabels
+];
+
 /** The planner of no store's statements, which validates what every store's would: drivine4j's `VALIDATOR`. */
 const VALIDATOR = new SchemaPlan('neo4j', undefined);
 
@@ -101,6 +118,10 @@ const VALIDATOR = new SchemaPlan('neo4j', undefined);
  * Before anything is applied, by `enforce`, `recreateAll` or `ensure`, a vector index over a property that a fragment
  * class stores in a field without @VectorIndex is refused, naming the class, the field and the spec; a fragment class
  * built later is checked against the specs applied here. See VectorAnnotationCheck.
+ *
+ * A fragment's @NodeId is given a range index by default (`SchemaCatalog.fromFragments`), unless an item of any
+ * catalog on the database, or one ensured at runtime, serves it. After an `enforce` or `recreateAll` a fragment whose
+ * @NodeId no index serves is warned of, once per database: see NodeIdIndexCheck.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
@@ -111,10 +132,20 @@ export class SchemaManager {
     /** Serializes `enforce`, `recreateAll`, `ensure` and `remove`, which read and write the runtime items and the markers. */
     private queue: Promise<unknown> = Promise.resolve();
 
+    /** The catalogs, without the @NodeIds' default indexes where `indexNodeIds` is false. */
+    private readonly catalogs: SchemaCatalog[];
+
     constructor(
         private readonly factory: GraphObjectManagerFactory,
         private readonly options: SchemaOptions
-    ) {}
+    ) {
+        this.catalogs =
+            options.indexNodeIds === false ? options.catalogs.map((it) => it.withoutNodeIdIndexes()) : options.catalogs;
+        // A manager with no item applies none, and lists nothing: its fragments are warned of as where there is none.
+        if (this.catalogs.some((it) => it.items.length)) {
+            NodeIdIndexCheck.managed();
+        }
+    }
 
     /**
      * Ensures every catalog on its databases, and every item given to `ensure`: indexes before constraints. Returns the
@@ -187,6 +218,12 @@ export class SchemaManager {
             const results = new Map<string, EnsureResult<SchemaSpec>[]>();
             for (const { database, planning, request } of planned) {
                 results.set(database, this.results(await planning.plan.run(request, planning.host)));
+                // What an enforce listed is kept current, so a fragment first used after this isn't warned of.
+                if (NodeIdIndexCheck.listedOn(database)) {
+                    // Its labels are named on the database from then on, so a fragment under one is checked there too.
+                    NodeIdIndexCheck.cataloguedToo(database, labelsOf(catalog));
+                    await this.listForNodeIds(database, planning);
+                }
             }
             return results;
         });
@@ -252,27 +289,70 @@ export class SchemaManager {
             );
             return it.databases ? catalog.forDatabases(...it.databases) : catalog;
         });
-        const all = [...this.options.catalogs, ...runtime];
+        const all = [...this.catalogs, ...runtime];
         if (!all.some((it) => it.items.length)) {
             this.logNothingToApply();
             return report;
         }
         VectorAnnotationCheck.register(all);
-        for (const database of this.databases(all)) {
+        const databases = this.databases(all);
+        // Before any is listed: a fragment is checked on the databases whose catalogs name its labels (drivine4j#848).
+        NodeIdIndexCheck.catalogued(
+            new Map(
+                databases.map((database) => [
+                    database,
+                    all.filter((it) => this.databases([it]).includes(database)).flatMap(labelsOf)
+                ])
+            )
+        );
+        for (const database of databases) {
             const planning = this.factory.get(database).schemaPlanning();
             report.set(
                 database,
                 this.results(await planning.plan.run(this.request(database, operation, this.runtime), planning.host))
             );
+            await this.listForNodeIds(database, planning);
         }
         return report;
     }
 
+    /**
+     * What serves a fragment's @NodeId on `database` once the catalogs are applied, its range indexes and uniqueness
+     * constraints, for NodeIdIndexCheck to warn of a fragment none serves. A listing that fails is passed over: it only
+     * warns.
+     */
+    private async listForNodeIds(database: string, planning: SchemaPlanning): Promise<void> {
+        try {
+            const items = [
+                ...(await new IndexManager(planning).list('RANGE')).map((it) => ({ ...it, kind: 'RANGE' as const })),
+                ...(await new ConstraintManager(planning).list()).map((it) => ({ ...it, kind: 'UNIQUE' as const }))
+            ];
+            NodeIdIndexCheck.listed(database, items, this.rangesPerProperty(database));
+        } catch (e) {
+            this.logger.debug(`Could not list the schema of '${database}' to check fragments' @NodeIds: ${e}`);
+        }
+    }
+
+    /** Whether `database`'s engine lists a label's range properties as one item, each its own index (FalkorDB). */
+    private rangesPerProperty(database: string): boolean {
+        const type = DatabaseRegistry.getInstance().connectionProvider(database)?.type;
+        return type !== undefined && rangesPerProperty(type);
+    }
+
     /** The plan request of `operation` on `database`: the startup catalogs for it, and the runtime items there. */
     private request(database: string, operation: Record<string, any>, runtime: RuntimeCatalog[]): PlanRequest {
-        const catalogs = this.options.catalogs
-            .filter((it) => this.databases([it]).includes(database))
-            .map((it) => ({ owner: ownerOf(it.name), version: it.version ?? null, items: it.items.map(moduleSpec) }));
+        const onDatabase = this.catalogs.filter((it) => this.databases([it]).includes(database));
+        const runtimeOn = VALIDATOR.runtimeOn(database, runtime);
+        // A @NodeId's default index that another catalog's item serves is left out, as one its own serves is.
+        const declared = [
+            ...onDatabase.flatMap((it) => it.declaredItems),
+            ...runtimeOn.flatMap((it) => it.items.map((spec) => planSpec(spec) as SchemaSpec))
+        ];
+        const catalogs = onDatabase.map((it) => ({
+            owner: ownerOf(it.name),
+            version: it.version ?? null,
+            items: it.itemsBeside(declared).map(moduleSpec)
+        }));
         return planRequest(
             database,
             operation,
@@ -283,7 +363,7 @@ export class SchemaManager {
                 buildTimeoutMillis: this.options.indexBuildTimeout ?? DEFAULT_BUILD_TIMEOUT
             },
             catalogs,
-            VALIDATOR.runtimeOn(database, runtime),
+            runtimeOn,
             { onDrift: this.options.recreateOnDrift === true, onStartup: this.options.recreateOnStartup === true }
         );
     }
@@ -327,7 +407,7 @@ export class SchemaManager {
     private logNothingToApply(): void {
         const once =
             'Catalogs are read once, when the SchemaManager is built; schema known later is given to SchemaManager.ensure.';
-        const catalogs = this.options.catalogs;
+        const catalogs = this.catalogs;
         if (!catalogs.length) {
             this.logger.log(`Schema management found no SchemaCatalog; nothing to apply. ${once}`);
             return;

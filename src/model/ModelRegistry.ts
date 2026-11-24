@@ -19,6 +19,7 @@ import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewMode
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
+import { NodeIdIndexCheck } from '@/schema/NodeIdIndexCheck';
 
 /**
  * Builds the model of a decorated class from its decorators, once, and checks it. Models are built when first
@@ -221,6 +222,8 @@ export class ModelRegistry {
         // A catalog's vector index over a field without @VectorIndex is refused here as well as when the catalog is
         // applied, since either may come first.
         VectorAnnotationCheck.admit(model);
+        // A @NodeId no index serves is warned of, against what an enforce listed; never by reading the store here.
+        NodeIdIndexCheck.admit(model);
         return model;
     }
 

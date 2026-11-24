@@ -16,6 +16,8 @@ export enum ClassKind {
 export interface ClassMetadata {
     kind: ClassKind;
     labels?: string[];
+    /** A node fragment's: false where its @NodeId is given no range index by default (see NodeFragmentOptions). */
+    nodeIdIndex?: boolean;
 }
 
 export enum Direction {

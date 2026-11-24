@@ -1,5 +1,5 @@
 import { classSchemaDeclarations, SchemaDeclaration } from '@/annotation/Schema';
-import { propertyMetadata } from '@/annotation/Metadata';
+import { ownClassMetadata, propertyMetadata } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
@@ -40,9 +40,23 @@ export class SchemaCatalog {
      * their properties' graph names. A vector index's dimensions come from `dimensions` unless the decorator gives them.
      * Each item is given once, the indexes before the constraints, as `of` gives them: of each class, its own
      * declarations first, then its fields', by field name, as drivine4j reads them.
+     *
+     * Each class with a @NodeId is also given a range index over its property under the primary label, after the
+     * indexes declared, unless an item declared serves it: a range index or a uniqueness constraint over that property
+     * alone, neither ignoring case (see `nodeIdIndexes`). Each save and each load by id finds its node by the @NodeId,
+     * and with no index over it a store reads every node of the label (#800, drivine4j#827). `@NodeFragment({
+     * nodeIdIndex: false })` turns it off for a class, `withoutNodeIdIndexes` for the catalog, and SchemaOptions'
+     * `indexNodeIds: false` for every catalog a manager is given.
      */
     static fromFragments(dimensions: VectorDimensionProvider | undefined, ...types: ClassRef[]): SchemaCatalog {
         const registry = new ModelRegistry();
+        const defaults = types.flatMap((type) => {
+            const model = registry.fragment(type as ClassType);
+            const label = model.labels[0];
+            return ownClassMetadata(type)?.nodeIdIndex !== false && label && model.nodeIdProperty
+                ? [rangeIndex(label, model.nodeIdProperty)]
+                : [];
+        });
         const items = types.flatMap((type) => {
             const model = registry.fragment(type as ClassType);
             const label = model.labels[0];
@@ -100,7 +114,23 @@ export class SchemaCatalog {
                 }
             });
         });
-        return new SchemaCatalog(asPlanned(items));
+        const declared = asPlanned(items);
+        // A default no declared item serves, once each: one declared, under a name or not, is the one made.
+        const unserved = defaults
+            .filter((it, i) => defaults.findIndex((other) => sameItem(other, it)) === i)
+            .filter((it) => !declared.some((item) => servesNodeId(item, it)));
+        return new SchemaCatalog(
+            [
+                ...declared.filter((it) => it.kind !== 'UNIQUE'),
+                ...unserved,
+                ...declared.filter((it) => it.kind === 'UNIQUE')
+            ],
+            undefined,
+            undefined,
+            DEFAULT_SCOPE,
+            unserved,
+            [...new Set(types.flatMap((type) => registry.fragment(type as ClassType).labels))]
+        );
     }
 
     private constructor(
@@ -113,21 +143,81 @@ export class SchemaCatalog {
          * Its owner: what its version and inventory are recorded under, in the owner's marker. Unnamed catalogs share the
          * owner 'schema', drivine4j's default scope.
          */
-        readonly name: string = DEFAULT_SCOPE
+        readonly name: string = DEFAULT_SCOPE,
+        /**
+         * The range indexes among `items` that fragments' @NodeIds are given by default (`fromFragments`): each one no
+         * item declared serves. `withoutNodeIdIndexes` leaves them out.
+         */
+        readonly nodeIdIndexes: readonly SchemaSpec[] = [],
+        /**
+         * The labels of the fragments it was read from (`fromFragments`), kept whatever items it keeps, as with its
+         * default indexes left out: where a fragment belongs, so that the warning of an unindexed @NodeId is given on the
+         * databases its catalog is for, and not on another it is never used on (drivine4j#848).
+         */
+        readonly fragmentLabels: readonly string[] = []
     ) {}
 
     withVersion(version: string): SchemaCatalog {
-        return new SchemaCatalog(this.items, version, this.databases, this.name);
+        return new SchemaCatalog(
+            this.items,
+            version,
+            this.databases,
+            this.name,
+            this.nodeIdIndexes,
+            this.fragmentLabels
+        );
     }
 
     /** Records its version and inventory under this owner, so that owners version apart. */
     named(name: string): SchemaCatalog {
-        return new SchemaCatalog(this.items, this.version, this.databases, name);
+        return new SchemaCatalog(
+            this.items,
+            this.version,
+            this.databases,
+            name,
+            this.nodeIdIndexes,
+            this.fragmentLabels
+        );
     }
 
     /** Applies only to the databases named ('default' being the first registered). Replaces earlier targets. */
     forDatabases(...databases: string[]): SchemaCatalog {
-        return new SchemaCatalog(this.items, this.version, databases, this.name);
+        return new SchemaCatalog(
+            this.items,
+            this.version,
+            databases,
+            this.name,
+            this.nodeIdIndexes,
+            this.fragmentLabels
+        );
+    }
+
+    /**
+     * A copy without the range indexes fragments' @NodeIds are given by default (`nodeIdIndexes`), leaving only what is
+     * declared: as SchemaOptions' `indexNodeIds: false` gives a manager its catalogs.
+     */
+    withoutNodeIdIndexes(): SchemaCatalog {
+        return new SchemaCatalog(this.declaredItems, this.version, this.databases, this.name, [], this.fragmentLabels);
+    }
+
+    /** `items` without the defaults of `nodeIdIndexes`: what is declared. */
+    get declaredItems(): SchemaSpec[] {
+        return this.items.filter((it) => !this.nodeIdIndexes.includes(it));
+    }
+
+    /**
+     * `items` as they are applied beside `declared`, what the catalogs on a database declare: without a default of
+     * `nodeIdIndexes` one of them serves, as `fromFragments` leaves out one the catalog's own items serve. Applied beside
+     * it, a named range index over the id, or one of another owner, would be refused as a conflicting declaration, and a
+     * uniqueness constraint over it blocked by it on Neo4j. One declared the same, unnamed, is the same item: the default
+     * is kept beside it, co-owned, so that this owner's marker doesn't call the index both share an orphan.
+     */
+    itemsBeside(declared: SchemaSpec[]): SchemaSpec[] {
+        return this.items.filter(
+            (item) =>
+                !this.nodeIdIndexes.includes(item) ||
+                !declared.some((it) => !sameItem(it, item) && servesNodeId(it, item))
+        );
     }
 
     forDatabase(database: string): SchemaCatalog {
@@ -164,6 +254,20 @@ function asPlanned(items: SchemaSpec[]): SchemaSpec[] {
         }
     }
     return [...once.filter((it) => it.kind !== 'UNIQUE'), ...once.filter((it) => it.kind === 'UNIQUE')];
+}
+
+/**
+ * Whether `declared` serves `nodeId`, a @NodeId's default range index over one property: a range index or a uniqueness
+ * constraint over that property alone, under the label, that doesn't ignore case, whose index a lookup by the id reads
+ * (a uniqueness constraint's on every store, drivine-cypher-spec#325).
+ */
+function servesNodeId(declared: SchemaSpec, nodeId: SchemaSpec): boolean {
+    return (
+        (declared.kind === 'RANGE' || declared.kind === 'UNIQUE') &&
+        declared.ignoreCase !== true &&
+        declared.label === nodeId.label &&
+        JSON.stringify(declared.properties) === JSON.stringify(nodeId.properties)
+    );
 }
 
 /**
