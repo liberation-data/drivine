@@ -434,6 +434,23 @@ describe("SchemaManager and a fragment's @NodeId's default index (#800)", () => 
         }
     });
 
+    it('should not catalogue an ensured catalog on a database no enforce listed', async () => {
+        DatabaseRegistry.getInstance().register({ name: 'other', type: DatabaseType.NEO4J } as ConnectionProvider);
+        try {
+            const manager = new SchemaManager(factory, {
+                catalogs: [SchemaCatalog.of(rangeIndex('Person', 'name')).forDatabase('graph')]
+            });
+            await manager.enforce();
+            const too = jest.spyOn(NodeIdIndexCheck, 'cataloguedToo');
+            // 'other' was never listed: naming Order there would stop it being checked on 'graph', where it is used.
+            await manager.ensure(SchemaCatalog.of(rangeIndex('Order', 'at')).named('app').forDatabase('other'));
+            expect(too).not.toHaveBeenCalled();
+        } finally {
+            DatabaseRegistry.tearDown();
+            DatabaseRegistry.getInstance().register({ name: 'graph', type: DatabaseType.NEO4J } as ConnectionProvider);
+        }
+    });
+
     it('should apply the catalogs without their defaults where indexNodeIds is false', async () => {
         await new SchemaManager(factory, {
             catalogs: [SchemaCatalog.fromFragments(undefined, SessionFixture, RangedSessionFixture)],
