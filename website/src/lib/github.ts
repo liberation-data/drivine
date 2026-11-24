@@ -167,12 +167,11 @@ async function fetchStudioRelease(): Promise<StudioRelease | undefined> {
         appleSilicon: download((name) => name.endsWith('.dmg') && name.includes('arm64'), 'Apple Silicon'),
         intel: download((name) => name.endsWith('.dmg') && name.includes('x64'), 'Intel'),
     };
-    // Installers first (double-click to install, with a menu entry and icon), then the AppImage, which runs without
-    // installing and covers the distros the two installers don't.
+    // The two native installers, labelled by the distros that use them. A software-centre can't open a local package on
+    // current Fedora/GNOME, so the page's install hint gives the terminal command for each.
     const linux = [
         download((name) => name.endsWith('.deb'), 'Debian / Ubuntu'),
         download((name) => name.endsWith('.rpm'), 'Fedora / RHEL'),
-        download((name) => name.endsWith('.AppImage'), 'AppImage'),
     ].filter((d): d is Download => d !== undefined);
     // A release with no installer for any platform is no download: the page falls back to building from source.
     if (!mac.appleSilicon && !mac.intel && linux.length === 0) {
