@@ -341,11 +341,11 @@ describe('A Temporal parameter on Neo4j', () => {
         expect([params[1].toString(), params[2][0].toString()]).toEqual(['2024-01-15', '2024-01-15']);
     });
 
-    it("leaves the driver's own temporal value, a Date and another class's value as they are (#767)", () => {
+    it("leaves the driver's own temporal value and another class's value as they are (#767)", () => {
         class Money {
             constructor(readonly cents: number) {}
         }
-        const values = { date: new neo4j.types.Date(2024, 1, 15), at: new Date(0), money: new Money(5) };
+        const values = { date: new neo4j.types.Date(2024, 1, 15), money: new Money(5) };
         const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({
             ...values,
             l: [values.date]

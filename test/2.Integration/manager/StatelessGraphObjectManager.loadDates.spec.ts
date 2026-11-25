@@ -59,13 +59,13 @@ class Diary {
     @GraphPath([{ type: 'PLANS' }, { type: 'NEXT' }], { target: () => Event }) after: Event[];
 }
 
-/** Whole seconds, as Memgraph's datetime() reads no fraction before `Z`. */
 const moment = (day: number): Date => new Date(`2026-01-0${day}T00:00:00.000Z`);
 const SINCE = new Date('2025-12-01T00:00:00.000Z');
 
 /**
  * A property declared a Date loads as a Date on every store, the instant Neo4j's driver gives (#807): Oracle, Postgres,
- * SQLite and FalkorDB gave its text before, where Neo4j and Memgraph gave a Date.
+ * SQLite and FalkorDB gave its text before, where Neo4j and Memgraph gave a Date. A save writes it on every store too,
+ * Neo4j and Memgraph among them, whose driver sent a Date as an empty map (#810).
  */
 describe.each(allStores())('a property declared a Date, loaded on $type', (store) => {
     let pm: PersistenceManager;
@@ -81,23 +81,6 @@ describe.each(allStores())('a property declared a Date, loaded on $type', (store
             await pm.execute(new QuerySpecification(new SqliteGraph().ensuring));
         }
         await clearLabels(pm, store, 'LoadDate');
-        if ([DatabaseType.NEO4J, DatabaseType.MEMGRAPH].includes(store.type)) {
-            // Made by Cypher's datetime() on Neo4j and Memgraph, whose drivers send a JavaScript Date as an empty map,
-            // which a save can't write (#810).
-            const at = (date: Date): string => `datetime('${date.toISOString().replace('.000Z', 'Z')}')`;
-            const node = (id: string, day: number): string =>
-                `(${id}:LoadDate:Event {id: '${id}', at: ${at(moment(day))}, due_at: ${at(moment(day + 1))}})`;
-            await pm.execute(
-                new QuerySpecification({
-                    text:
-                        `CREATE (p:LoadDate:Person {id: 'p'}), ${node('e1', 1)}, ${node('e2', 2)}, ${node('e3', 3)}, ` +
-                        `${node('e4', 4)}, (p)-[:PLANS]->(e1), (e1)-[:NEXT]->(e2), (e1)-[:FOLLOWS]->(e3), ` +
-                        `(p)-[:ATTENDS {since: ${at(SINCE)}}]->(e4)`,
-                    language: 'CYPHER'
-                })
-            );
-            return;
-        }
         const event = (id: string, day: number): Event =>
             Object.assign(new Event(), { id, at: moment(day), due: moment(day + 1) });
         await gom.save(

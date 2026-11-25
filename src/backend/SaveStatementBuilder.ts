@@ -974,8 +974,9 @@ function skipped(
 /**
  * A loaded value as the check of `update`'s save binds it: as it is where the store can compare it with what the node
  * holds, and otherwise null, which no comparison refuses, so the stamp alone speaks for it. A load hands over a value
- * it can't be given back as: a temporal value as a Date, which the Neo4j driver sends as an empty map, unequal to any
- * property, so the save would be refused each time.
+ * it can't be given back as: a temporal value as a Date, which isn't equal to what the store holds wherever that is
+ * finer than a millisecond, in a named zone, or another kind, such as a SQL store's text, so the save would be refused
+ * each time.
  */
 function asCompared(loaded: any): any {
     // A set is stored as a list, in the order it holds its items: a load of one keeps the list's order.
