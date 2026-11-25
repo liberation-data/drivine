@@ -40,6 +40,9 @@ const SERIAL = [
     'test/2.Integration/manager/StatelessGraphObjectManager.idKind',
     'test/2.Integration/manager/StatelessGraphObjectManager.bm25',
     'test/2.Integration/manager/StatelessGraphObjectManager.rankingAgreement',
+    // Makes and drops indexes and constraints on every store: on Oracle, a drop waits on the tables other suites write,
+    // and fails with ORA-00054 (#854).
+    'test/2.Integration/manager/StatelessGraphObjectManager.caseInsensitive',
     // How long Oracle takes to plan a statement, which a parallel suite's own planning on the same database would add to.
     'test/2.Integration/oracle/OracleEraParse',
     // How a write's time grows with its rows, over two runs that a parallel suite's load would slow unevenly.
