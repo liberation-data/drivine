@@ -78,6 +78,11 @@ export interface StoreStatements {
      * and sorted by its code points whatever the session's `NLS_COMP` and `NLS_SORT` (drivine-cypher-spec#372).
      */
     session?: string[];
+    /**
+     * On Oracle, the query that lists the graph's labelled indexes, a row each, `{kind, label, properties}`: what a
+     * library tells the compiler of as `indexedProperties` (drivine-cypher-spec#432, see `OracleIndexedProperties`).
+     */
+    labelled?: string;
     stamp: StampStatements;
     marker: MarkerStatements;
 }

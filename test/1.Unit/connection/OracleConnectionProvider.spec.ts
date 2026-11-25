@@ -1,3 +1,4 @@
+import { OracleIndexedProperties } from '@/backend/oracle/OracleIndexedProperties';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { OracleConnectionProvider, oracleRefusal } from '@/connection/oracle/OracleConnectionProvider';
 import { storeStatements } from '@/backend/StoreStatements';
@@ -126,6 +127,10 @@ function server(full: string): { oracleServerVersion: number; oracleServerVersio
  * and Cypher is refused with the version found (#428, as liberation-data/drivine4j#401).
  */
 describe('The Oracle version, read on the first connection', () => {
+    // What the catalog lists of the graph's labelled indexes is read apart (see OracleIndexedProperties): none here.
+    beforeEach(() => jest.spyOn(OracleIndexedProperties, 'of').mockResolvedValue([]));
+    afterEach(() => jest.restoreAllMocks());
+
     afterEach(() => jest.restoreAllMocks());
 
     it('should refuse an Oracle older than 23.9 with the version it is and why, and not 23.9 or later', () => {
