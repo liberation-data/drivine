@@ -245,6 +245,92 @@ describe('NodeIdIndexCheck', () => {
         expect(warnings).toEqual([]);
     });
 
+    /**
+     * With no SchemaManager, the index or constraint the warning names, ensured by hand, serves the fragment, on whichever
+     * database: the warning UNMANAGED_DELAY_MILLIS after its first use isn't given (drivine4j#886). One that doesn't
+     * serve it leaves the warning.
+     */
+    it('should take an index or a constraint ensured by hand with no schema manager as serving the id later', () => {
+        jest.useFakeTimers();
+        const created = (spec: any) => ({ status: 'CREATED' as const, spec });
+        NodeIdIndexCheck.ensured('neo', rangeIndex('Order', 'id'), created(rangeIndex('Order', 'id')));
+        use(OrderFixture);
+        // Ensured after the first use, before the delay is up, serves it too.
+        use(InvoiceFixture);
+        NodeIdIndexCheck.ensured(
+            'neo',
+            uniquenessConstraint('Invoice', 'invoice_no'),
+            created(uniquenessConstraint('Invoice', 'invoice_no'))
+        );
+        jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
+        expect(warnings).toEqual([]);
+
+        // Under another of the fragment's labels serves it too: a save matches every label.
+        NodeIdIndexCheck.reset();
+        NodeIdIndexCheck.ensured('neo', rangeIndex('Purchase', 'id'), created(rangeIndex('Purchase', 'id')));
+        use(OrderFixture);
+        jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
+        expect(warnings).toEqual([]);
+
+        // Found already matching, or recreated, serves it as made does; through 'default' as through a name.
+        NodeIdIndexCheck.reset();
+        const order = uniquenessConstraint('Order', 'id');
+        NodeIdIndexCheck.ensured('default', order, { status: 'ALREADY_MATCHING', spec: order });
+        const invoice = rangeIndex('Invoice', 'invoice_no');
+        NodeIdIndexCheck.ensured('neo', invoice, { status: 'RECREATED', spec: invoice });
+        use(OrderFixture);
+        use(InvoiceFixture);
+        jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
+        expect(warnings).toEqual([]);
+
+        NodeIdIndexCheck.reset();
+        NodeIdIndexCheck.ensured(
+            'neo',
+            rangeIndex('Order', 'id', { ignoreCase: true }),
+            created(rangeIndex('Order', 'id', { ignoreCase: true }))
+        );
+        NodeIdIndexCheck.ensured(
+            'neo',
+            rangeIndex('Order', ['id', 'placedAt']),
+            created(rangeIndex('Order', ['id', 'placedAt']))
+        );
+        NodeIdIndexCheck.ensured('neo', uniquenessConstraint('Order', 'id'), {
+            status: 'DRIFT',
+            spec: uniquenessConstraint('Order', 'id')
+        } as any);
+        use(OrderFixture);
+        jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
+        // One that ignores case, over more properties, or not made.
+        expect(warnings).toEqual([ORDER_WARNING]);
+
+        // Forgotten by a reset, as everything else is.
+        NodeIdIndexCheck.reset();
+        warnings.length = 0;
+        NodeIdIndexCheck.ensured('neo', rangeIndex('Order', 'id'), created(rangeIndex('Order', 'id')));
+        NodeIdIndexCheck.reset();
+        use(OrderFixture);
+        jest.advanceTimersByTime(NodeIdIndexCheck.UNMANAGED_DELAY_MILLIS);
+        expect(warnings).toEqual([ORDER_WARNING]);
+    });
+
+    it('should leave an index ensured by hand before an enforce to what the enforce lists', () => {
+        const created = { status: 'CREATED' as const, spec: rangeIndex('Order', 'id') };
+        NodeIdIndexCheck.ensured('neo', rangeIndex('Order', 'id'), created);
+        use(OrderFixture);
+        NodeIdIndexCheck.managed();
+        NodeIdIndexCheck.listed('neo', []);
+        // The store, as listed, has no index serving it.
+        expect(warnings).toEqual([ORDER_WARNING]);
+
+        NodeIdIndexCheck.reset();
+        warnings.length = 0;
+        NodeIdIndexCheck.ensured('neo', rangeIndex('Order', 'id'), created);
+        use(OrderFixture);
+        NodeIdIndexCheck.managed();
+        NodeIdIndexCheck.listed('neo', [range('Order', 'id')]);
+        expect(warnings).toEqual([]);
+    });
+
     it('should warn of a fragment later with no schema manager, and not where one was built by then', () => {
         jest.useFakeTimers();
         use(OrderFixture);

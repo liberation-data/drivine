@@ -123,7 +123,7 @@ export class ConstraintManager {
             throw new DrivineError(`The plan of ${call} of the constraint on ${spec.label} gave no result.`);
         }
         const result = ensureResult(item.result, spec);
-        // Kept current for the check of an unindexed @NodeId, where an enforce listed the database.
+        // Kept for the check of an unindexed @NodeId: what an enforce listed, or, with none, what was ensured by hand.
         NodeIdIndexCheck.ensured(this.planning.database, spec, result);
         return result;
     }

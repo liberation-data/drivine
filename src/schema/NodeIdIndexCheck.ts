@@ -18,7 +18,8 @@ export type ListedItem = Pick<SchemaItem, 'label' | 'properties'> & { kind: 'RAN
  * enforce is checked when it runs, and one first used after it against what it listed, each only on the databases where
  * it belongs (`catalogued`, drivine4j#848). Where no SchemaManager with a
  * catalog has been built, nothing applies one; as one may yet be, as an application starts, a fragment is warned of
- * only if none has been UNMANAGED_DELAY_MILLIS after its first use.
+ * only if none has been UNMANAGED_DELAY_MILLIS after its first use, and no index or constraint ensured by hand by then
+ * serves its id (`ensured`, drivine4j#886).
  *
  * The warning is logged at WARN, which DrivineLogger prints where DRIVINE_LOG_LEVEL is WARN or lower.
  */
@@ -33,6 +34,12 @@ export class NodeIdIndexCheck {
 
     /** What serves an id on each database an enforce listed: its range indexes and constraints over one property. */
     private static readonly served = new Map<string, Set<string>>();
+
+    /**
+     * What serves an id that was ensured on a database no enforce has listed: with no SchemaManager, the index the warning
+     * names, ensured by hand, serves the fragment, which `unmanaged` then doesn't warn of (drivine4j#886).
+     */
+    private static readonly ensuredUnlisted = new Map<string, Set<string>>();
 
     /** The fragments warned of, by database ('' for none: no SchemaManager), each once. */
     private static readonly warned = new Map<string, Set<Function>>();
@@ -105,10 +112,10 @@ export class NodeIdIndexCheck {
     }
 
     /**
-     * `spec` was ensured or recreated on `database` with `result`, outside a SchemaManager: where an enforce listed the
-     * database, an id it serves is served from then on, so a fragment first used after it isn't warned of. Nothing is
-     * read of the store. `database` is a manager's, which may be 'default': it is taken as the database it names, as
-     * `listed` is given each under its registered name.
+     * `spec` was ensured or recreated on `database` with `result`, outside a SchemaManager: an id it serves is served from
+     * then on, so a fragment first used after it isn't warned of, on a database an enforce listed or, with no enforce, by
+     * `unmanaged` (drivine4j#886). Nothing is read of the store. `database` is a manager's, which may be 'default': it is
+     * taken as the database it names, as `listed` is given each under its registered name.
      */
     static ensured(database: string, spec: IndexSpec | UniquenessConstraintSpec, result: EnsureResult<any>): void {
         if (!['CREATED', 'ALREADY_MATCHING', 'RECREATED'].includes(result.status)) {
@@ -118,14 +125,30 @@ export class NodeIdIndexCheck {
             return;
         }
         const name = DatabaseRegistry.getInstance().connectionProvider(database)?.name ?? database;
-        this.served.get(name)?.add(key(spec.label, spec.properties[0]));
+        const item = key(spec.label, spec.properties[0]);
+        const listing = this.served.get(name);
+        if (listing) {
+            listing.add(item);
+        } else {
+            this.ensuredUnlisted.set(name, (this.ensuredUnlisted.get(name) ?? new Set()).add(item));
+        }
     }
 
-    /** Warns of `type`, admitted under `generation`, where no SchemaManager has been built since. */
+    /**
+     * Warns of `type`, admitted under `generation`, where no SchemaManager has been built since, unless an index or a
+     * constraint ensured by hand on some database serves its id: what the warning would advise.
+     */
     static unmanaged(type: Function, generation: number = this.generation): void {
         this.guarded(() => {
             const model = this.admitted.get(type);
-            if (model && !this.managedSince && generation === this.generation) {
+            if (!model || this.managedSince || generation !== this.generation) {
+                return;
+            }
+            const property = model.nodeIdProperty!;
+            const servedByHand = [...this.ensuredUnlisted.values()].some((items) =>
+                model.labels.some((label) => items.has(key(label, property)))
+            );
+            if (!servedByHand) {
                 this.warn('', model);
             }
         });
@@ -136,6 +159,7 @@ export class NodeIdIndexCheck {
         this.generation++;
         this.admitted.clear();
         this.served.clear();
+        this.ensuredUnlisted.clear();
         this.warned.clear();
         this.cataloguedLabels = new Map();
         this.managedSince = false;
