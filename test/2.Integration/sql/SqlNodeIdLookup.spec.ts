@@ -19,6 +19,8 @@ import {
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
+import { sqlText } from '@/backend/sql/SqlGraph';
+import { SharedStore } from '@/cypher/SharedCypherCompiler';
 import { writeLayout } from '@/cypher/ValueLayout';
 import { ClassType } from '@/query/QuerySpecification';
 import { SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
@@ -443,37 +445,168 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
      * SQLite, whose planners are read here; Oracle's lookups are planned in drivine4j's suite.
      */
     const planned = store.type === DatabaseType.ORACLE ? it.skip : it;
-    planned('should read the index over the id for a load, a delete and loadRelated', async () => {
-        const constraint = { kind: 'UNIQUE' as const, label: 'LookupNumber', properties: ['id'] };
-        const sqlite = store.type === DatabaseType.SQLITE;
-        await gom.saveAll(Array.from({ length: 3000 }, (_, i) => make(LookupNumber, { id: 1000 + i, name: 'filler' })));
+    const postgresOnly = store.type === DatabaseType.POSTGRES ? it : it.skip;
+    const sqlite = store.type === DatabaseType.SQLITE;
+    const layout: SharedStore = sqlite ? 'sqlite' : 'postgres';
+
+    /**
+     * That `plan` reads `index` for the id, as drivine4j's readsIndex: on SQLite by both its columns, and on Postgres by
+     * the id's JSON, in the condition of the index scan itself, and with no full scan of the nodes.
+     */
+    const expectReads = (plan: string, index: string): void => {
+        if (sqlite) {
+            expect(plan).toMatch(
+                new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(<expr>=\\? AND <expr>=\\?\\)`, 'i')
+            );
+        } else {
+            expect(plan).toMatch(
+                new RegExp(
+                    `Index (Only )?Scan using ${index} on drivine_node[^\\n]*\\n\\s*Index Cond: \\(\\((\\w+\\.)?props -> 'id'::text\\) = `,
+                    'i'
+                )
+            );
+            expect(plan).not.toMatch(/Seq Scan on drivine_node\b/);
+        }
+    };
+
+    /** Each kind of id, with its many nodes and the id looked up among them, as drivine4j's lookups are planned. */
+    const kinds = [
+        {
+            type: LookupNumber,
+            label: 'LookupNumber',
+            nodes: (i: number) => make(LookupNumber, { id: 1000 + i, name: 'filler' }),
+            id: 1500
+        },
+        {
+            type: LookupDate,
+            label: 'LookupDate',
+            nodes: (i: number) => make(LookupDate, { id: new Date(Date.UTC(2020, 0, 1 + i)), name: 'filler' }),
+            id: day('2021-05-15')
+        },
+        {
+            type: LookupText,
+            label: 'LookupText',
+            nodes: (i: number) => make(LookupText, { id: `t${i}`, name: 'filler' }),
+            id: 't1500'
+        }
+    ];
+
+    /**
+     * Saves 3,000 nodes of `kind`, each joined to the target, so a relationship of the type is no rarer than the node it
+     * leaves, as drivine4j seeds them; ensures the uniqueness constraint over its id, analyzes, and runs `check`.
+     */
+    const withIndexed = async (
+        kind: (typeof kinds)[number],
+        check: (index: string) => Promise<void>
+    ): Promise<void> => {
+        const constraint = { kind: 'UNIQUE' as const, label: kind.label, properties: ['id'] };
+        await gom.saveAll(Array.from({ length: 3000 }, (_, i) => kind.nodes(i)) as object[]);
+        const carries = (alias: string, label: string): string =>
+            sqlite
+                ? `instr(${alias}.labels, '"SqlLookup"') > 0 AND instr(${alias}.labels, '"${label}"') > 0`
+                : `${alias}.labels @> '["SqlLookup", "${label}"]'`;
+        await pm.execute(
+            new QuerySpecification(
+                `INSERT INTO drivine_edge (src, dst, type, props) SELECT a.nid, b.nid, 'POINTS_TO', '{}' ` +
+                    `FROM drivine_node a, drivine_node b WHERE ${carries('a', kind.label)} AND ${carries(
+                        'b',
+                        'LookupTarget'
+                    )}`
+            )
+        );
         await gom.constraints.ensure(constraint);
         try {
-            await pm.execute(new QuerySpecification(sqlite ? 'ANALYZE' : 'ANALYZE drivine_node'));
-            const registry = new ModelRegistry();
-            const model = registry.fragment(LookupNumber);
-            const explain = async (text: string, bindings: Record<string, any>): Promise<string> => {
-                const rows = await pm.query<any>(
-                    new QuerySpecification(`${sqlite ? 'EXPLAIN QUERY PLAN' : 'EXPLAIN'} ${text}`).bind(bindings)
-                );
-                return rows.map((it) => (sqlite ? it.detail : Object.values(it)[0])).join('\n');
-            };
-            const index = 'drivine_uq2_lookupnumberid_\\w+';
-            const reads = sqlite
-                ? new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(<expr>=\\? AND <expr>=\\?\\)`, 'i')
-                : new RegExp(`Index (Only )?Scan using ${index} on drivine_node`, 'i');
-            const bound = { id: writeLayout(1500, 'postgres') };
-            expect(await explain(backend.loadFragment(model).text, bound)).toMatch(reads);
-            expect(await explain(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(reads);
-            const related = backend.related(
-                { model, id: 1500 },
-                'POINTS_TO',
-                Direction.OUTGOING,
-                registry.fragment(LookupTarget)
-            );
-            expect(await explain(related.text, related.bindings)).toMatch(reads);
+            await pm.execute(new QuerySpecification(sqlite ? 'ANALYZE' : 'ANALYZE drivine_node, drivine_edge'));
+            await check(`drivine_uq2_${kind.label.toLowerCase()}id_\\w+`);
         } finally {
             await gom.constraints.drop(constraint);
+        }
+    };
+
+    planned.each(kinds.map((it) => [it.label, it]))(
+        'should read the index over the id for a load, a delete and loadRelated of a %s',
+        async (_, kind) => {
+            await withIndexed(kind, async (index) => {
+                const registry = new ModelRegistry();
+                const model = registry.fragment(kind.type);
+                const explain = async (text: string, bindings: Record<string, any>): Promise<string> => {
+                    const rows = await pm.query<any>(
+                        new QuerySpecification(`${sqlite ? 'EXPLAIN QUERY PLAN' : 'EXPLAIN'} ${text}`).bind(bindings)
+                    );
+                    return rows.map((it) => (sqlite ? it.detail : Object.values(it)[0])).join('\n');
+                };
+                const bound = { id: writeLayout(kind.id, layout) };
+                expectReads(await explain(backend.loadFragment(model).text, bound), index);
+                expectReads(await explain(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound), index);
+                const related = backend.related(
+                    { model, id: kind.id },
+                    'POINTS_TO',
+                    Direction.OUTGOING,
+                    registry.fragment(LookupTarget)
+                );
+                expectReads(await explain(related.text, related.bindings), index);
+            });
+        }
+    );
+
+    /**
+     * A save finds each node through the lookup Postgres's write function prepares, `drivine_find`: called on one
+     * connection, in a transaction rolled back after, the statement it prepared is explained there, for the id's JSON,
+     * as drivine4j's NodeIdLookupCrossEngineTest explains it.
+     */
+    postgresOnly.each(kinds.map((it) => [it.label, it]))(
+        "should read the index for a save's lookup of a %s",
+        async (_, kind) => {
+            await withIndexed(kind, async (index) => {
+                const id = writeLayout(kind.id, 'postgres');
+                const connection = await DatabaseRegistry.getInstance().connectionProvider(store.name)!.connect();
+                let plan: string;
+                try {
+                    await connection.startTransaction();
+                    await connection.query(
+                        new QuerySpecification(`SELECT (drivine_find($labels::jsonb, 'id', $id::jsonb)).nid`).bind({
+                            labels: JSON.stringify(['SqlLookup', kind.label]),
+                            id
+                        })
+                    );
+                    const statements = await connection.query<any>(
+                        new QuerySpecification(
+                            `SELECT name FROM pg_prepared_statements WHERE name LIKE 'drivine_find_%' AND statement LIKE $label`
+                        ).bind({ label: `%"${kind.label}"%` })
+                    );
+                    // The one lookup of the label's shape: the first of several could be another lookup's plan.
+                    expect(statements).toHaveLength(1);
+                    const [prepared] = statements;
+                    const rows = await connection.query<any>(
+                        new QuerySpecification(`EXPLAIN EXECUTE ${prepared.name}(${sqlText(id)}::jsonb)`)
+                    );
+                    plan = rows.map((it) => Object.values(it)[0]).join('\n');
+                } finally {
+                    await connection.rollbackTransaction();
+                    await connection.release();
+                }
+                expectReads(plan, index);
+            });
+        }
+    );
+
+    /**
+     * A plan whose `ref` or `patch` step carries only the id's text, as plans before layout 2 did, is refused by name by
+     * Postgres's write function, rather than finding no node and reading as absent (drivine-cypher-spec#245).
+     */
+    postgresOnly("should have the store refuse a ref or a patch step without the id's JSON, by name", async () => {
+        const shapes = JSON.stringify([{ labels: ['SqlLookup', 'LookupText'], key: 'id' }]);
+        for (const step of [
+            { op: 'ref', r: 0, s: 0, k: 't1' },
+            { op: 'patch', s: 0, k: 't1', i: '0', fresh: 'f' }
+        ]) {
+            await expect(
+                pm.execute(
+                    new QuerySpecification(
+                        `SELECT drivine_write(CAST($plan AS jsonb), CAST($shapes AS jsonb), 'mark', 'COUNT', NULL)`
+                    ).bind({ plan: JSON.stringify([step]), shapes })
+                )
+            ).rejects.toThrow(/A plan step that finds a node by id carries no id/);
         }
     });
 });
