@@ -13,6 +13,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `store.yaml`: the store layout's DDL: the tables, the probe that finds them made, and each index and constraint as each store makes, drops and lists it, for the graph `drivine` and a set of schema specs, with a read for each index that the compiler must answer from it. Read with no store. See [The store layout](#the-store-layout). It also holds the store's schema: how each store's listings are read back, whether an item is a spec's and in its shape, and on a SQL store of which form, what each store can do, and what its errors say. See [The store's schema](#the-stores-schema).
 - `marker.yaml`: the schema marker (`_DrivineSchema`) and the stamps: the statements each store reads and writes the marker and the store's stamp (`DrivineStore`) with, the marker's inventory as it is written and read back, the version token, and the form of the stamp each node carries. Read with no store. See [The schema marker and the stamps](#the-schema-marker-and-the-stamps).
 - `migrate.yaml`: a store's layout migrated, from layout 1 to layout 2: each row of a node's or a relationship's properties as layout 1 held it, on each SQL store, rewritten as layout 2 holds it, under what the migration is told of the properties' kinds. Read with no store. See [Migrating a store's layout](#migrating-a-stores-layout).
+- `bulk.yaml`: a bulk import of nodes and relationships into a SQL store: the statements a library runs, in order, in one transaction, for the graph `drivine`. Read with no store. See [Importing a graph in bulk](#importing-a-graph-in-bulk).
 - `plans.yaml`: the schema plan: what a schema manager runs on each store, round by round, for an enforce, a recreate, an ensure or a remove, what the store answers, and what the manager reports, its log lines among it. Read with no store. See [The schema plan](#the-schema-plan).
 - `declarations.yaml`: what each library's schema declarations give the schema planner: the catalogs of a request, and the items ensured at runtime, for each of a set of declarations. Read with no store. See [The schema declarations](#the-schema-declarations).
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
@@ -446,6 +447,36 @@ The checkpoint, the row `checkpoint` of the checkpoint table, holds the layouts 
 An action is one of a `query`, whose rows the planner reads, each one JSON object read into a map; an `execute`, in auto-commit; a `transaction` of `execute`s, all of them or none; `prepare`; `lock`; and `assignStamp`. Each is answered `rows`, `ran` or `failed`, with the store's message, which ends the migration as `failed`. `migrate.yaml`'s `statements` pin each store's statements for the graph `drivine`, and the module's `LayoutMigratorTest` runs a migration against a store kept in memory, stopped after each action of each round and begun again, and requires every row rewritten exactly once and the rows a migration never stopped gives.
 
 The report a migration ends with, and a dry run's whole answer, is `{status, message, tables: {nodes: {rows, changed}, edges: …}, properties: [{label, property, changes: {<change>: <count>}, invalid: [{table, id, kind, value, message}]}], observed: [{label, property, classes: {<class>: <count>}}], candidates: [{label, property, kind, values}], kept: [{table, id, labels, property, kind, value, message}], collisions: [{label, properties, sample}], notes: [<text>, …]}`, its status one of `current`, `empty`, `refused`, `inProgress` (a dry run of a graph part way through a migration), `invalid`, `dryRun`, `collisions`, `migrated` and `failed`. A property of a node of two labels is counted under both.
+
+
+### Importing a graph in bulk
+
+A bulk import writes many nodes and relationships at once (`bulk.yaml`, liberation-data/drivine4j#684). Postgres has it so
+far. Its rows are what a save writes, so a graph imported is read, saved and stamped as one saved is. The import is all or
+nothing: one transaction, which a failure rolls back, the edge table's foreign keys and indexes included.
+
+A library gives the nodes and relationships call by call:
+- **Nodes, before any relationship.** Each call is of one label, with the property its relationships find a node by, its
+  key. Each node is written as a save writes it: its labels, its props (each value as `StoreValues.text` gives it, nulls left
+  out, keys escaped), and a stamp of its own. The lowercased copies the library keeps are written by the graph's own
+  `<graph>_lowered`. A key the graph or the import holds already refuses the import (`takenKeys`): a bulk import makes
+  nodes, and finds none to merge into. So does a node whose props don't hold its key, or hold another value, or whose
+  labels haven't the call's.
+- **Relationships, by their ends' keys.** Each call is of one type, from one label's nodes to another's. An end is a node
+  the import made, or one of the graph's (`findEnds`). A key two of the graph's nodes hold is no end (`ambiguousKeys`), nor
+  is a key no node holds (`missingEnds`): either refuses the import. A relationship is made as `CREATE` makes one, beside
+  any other of its type between the same nodes. A node of the graph that gains one gets a new second token in its stamp
+  (`relink`), as a save gives a node whose relationships it changed.
+
+While it runs the import holds the graph alone. It takes the lock row a schema change takes, and locks the node and edge
+tables against other writers (`lockTables`): reads go on. Before the first relationship it drops the edge table's two
+foreign keys and its two indexes (`defer`), and reads of either table wait too: dropping a foreign key locks the table
+it references as well. Last, it makes them again as the layout made them, with the `maintenance_work_mem` the library
+gives, and analyses both tables (`rebuild`). Each relationship's cost then stays flat however large the graph grows.
+Checked as each relationship is written, a foreign key locks its node's row, which writes to the node table; once that
+table outgrows the cache, each check is a read and a write of the disk. At scale 10 of Graph Bench (44.8M relationships)
+that took the load from 1,870 s to 219 s. Made again at the end, the foreign keys check every relationship, so one with
+no node at an end fails the import there. The staging tables are temporary, and dropped at the commit.
 
 ## The schema plan
 
