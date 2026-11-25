@@ -2,7 +2,6 @@ import {
     CascadeType,
     CypherBackend,
     cypherGrammarFor,
-    DatabaseType,
     Direction,
     GraphRelationship,
     GraphView,
@@ -77,10 +76,6 @@ describe.each(graphEngines())("a lookup by an id's text on $type", (engine) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
     const target = nodeRef(IdTextTarget, 'x');
-    // Neo4j and Memgraph don't yet save a property holding a JavaScript Date (#810), so a Date id is found by its text
-    // only on FalkorDB until it lands.
-    const savesDates = ![DatabaseType.NEO4J, DatabaseType.MEMGRAPH].includes(engine.type);
-    const withDates = savesDates ? it : it.skip;
 
     const clear = async (): Promise<void> => {
         await pm.execute(new QuerySpecification('MATCH (n:IdTextGraph) DETACH DELETE n'));
@@ -140,7 +135,7 @@ describe.each(graphEngines())("a lookup by an id's text on $type", (engine) => {
         await lookups(IdTextNumber, make(IdTextNumber, { id: 5, name: 'five' }), '5');
     });
 
-    withDates('should find a Date id by its text, a day and an instant', async () => {
+    it('should find a Date id by its text, a day and an instant', async () => {
         await lookups(IdTextDate, make(IdTextDate, { id: day('2024-03-04'), name: 'march' }), '2024-03-04');
         await lookups(
             IdTextDate,
@@ -162,7 +157,7 @@ describe.each(graphEngines())("a lookup by an id's text on $type", (engine) => {
      * A cascade delete by a Date id's text finds its root as a load does, both in the check that refuses a tree deeper
      * than the view reads and in the delete itself.
      */
-    withDates("should check the depth of a cascade delete by a Date id's text, and delete the tree", async () => {
+    it("should check the depth of a cascade delete by a Date id's text, and delete the tree", async () => {
         const isos = ['2026-02-01', '2026-02-02', '2026-02-03'];
         for (const [i, iso] of isos.entries()) {
             await gom.save(make(IdTextDate, { id: day(iso), name: `tree day ${i}` }));

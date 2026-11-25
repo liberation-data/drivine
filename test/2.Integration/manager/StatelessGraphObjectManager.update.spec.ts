@@ -3,6 +3,7 @@ import {
     CypherBackend,
     cypherGrammarFor,
     DatabaseType,
+    GraphProperty,
     GraphRelationship,
     GraphView,
     JsonPacked,
@@ -105,12 +106,15 @@ class Unnamed {
     @NodeStamp() stamp?: string;
 }
 
-/** A field the store holds as a temporal value, which a load hands over as a Date. */
+/**
+ * A field the store holds as a temporal value, which a load hands over as a Date: declared, so TypeScript records its
+ * type, which a load on FalkorDB reads it by (#807).
+ */
 @NodeFragment({ labels: ['UpdateTest', 'Dated'] })
 class Dated {
     @NodeId() id: string;
     text?: string;
-    seen?: Date;
+    @GraphProperty('seen') seen?: Date;
     @NodeStamp() stamp?: string;
 }
 
@@ -339,6 +343,19 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
             await pm.execute(new QuerySpecification("MATCH (n:Tagged {id: 't1'}) SET n.`meta.seen` = datetime()"));
             await gom.update(Tagged, 't1', (it) => void (it.text = 'two'), 1);
             expect((await gom.load(Tagged, 't1'))!.text).toEqual('two');
+        });
+
+        it('should save a Date, update the node holding it at the first attempt, and write a new one (#810)', async () => {
+            const seen = new Date('2026-03-04T05:06:07.089Z');
+            await gom.save(make(Dated, { id: 'd2', text: 'one', seen }));
+            expect((await gom.load(Dated, 'd2'))!.seen).toEqual(seen);
+
+            await gom.update(Dated, 'd2', (it) => void (it.text = 'two'), 1);
+            expect(await gom.load(Dated, 'd2')).toMatchObject({ text: 'two', seen });
+
+            const later = new Date('2026-04-05T06:07:08.090Z');
+            await gom.update(Dated, 'd2', (it) => void (it.seen = later), 1);
+            expect((await gom.load(Dated, 'd2'))!.seen).toEqual(later);
         });
 
         it('should update a node whose packed text another writer wrote with other spacing, at the first attempt', async () => {

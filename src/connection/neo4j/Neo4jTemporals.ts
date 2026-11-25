@@ -3,9 +3,10 @@ import neo4j from 'neo4j-driver';
 const { Date: DriverDate, DateTime, Duration, LocalDateTime, LocalTime }: typeof neo4j.types = neo4j.types;
 
 /**
- * `value`, a statement's parameters, with each `Temporal` value in it, at any depth of lists and maps, the Neo4j
- * driver's value of its kind, which the driver binds as that kind: the driver writes a `Temporal` value as an empty
- * map (#767). The SQL stores tag each by its kind (see `parametersJson`), so a statement gives alike on each.
+ * `value`, a statement's parameters, with each `Temporal` value and each `Date` in it, at any depth of lists and maps,
+ * the Neo4j driver's value of its kind, which the driver binds as that kind: the driver writes a `Temporal` value and a
+ * `Date` as an empty map (#767, #810). The SQL stores tag each by its kind (see `parametersJson`), a `Date` as a
+ * datetime, so a statement gives alike on each.
  */
 export function withTemporalsAsDriverValues(value: any): any {
     if (Array.isArray(value)) {
@@ -14,6 +15,9 @@ export function withTemporalsAsDriverValues(value: any): any {
     }
     if (value === null || typeof value !== 'object') {
         return value;
+    }
+    if (value instanceof Date) {
+        return dateTimeOfDate(value);
     }
     const driver = driverValue(value);
     if (driver !== undefined) {
@@ -61,6 +65,27 @@ function driverValue(value: any): unknown {
         default:
             return undefined;
     }
+}
+
+/**
+ * The driver's datetime of the `Date` `date`, at an offset of zero and no named zone, as a `Temporal.Instant` is, so it
+ * reads back as the same instant wherever it's written; null for an invalid `Date`, as the SQL stores bind it. Not the
+ * driver's `fromStandardDate`, which takes the offset of the machine's zone.
+ */
+function dateTimeOfDate(date: Date): unknown {
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+    return new DateTime(
+        date.getUTCFullYear(),
+        date.getUTCMonth() + 1,
+        date.getUTCDate(),
+        date.getUTCHours(),
+        date.getUTCMinutes(),
+        date.getUTCSeconds(),
+        date.getUTCMilliseconds() * 1e6,
+        0
+    );
 }
 
 /** The driver's datetime of the `Temporal.ZonedDateTime` `it`, at its offset, and in the named zone `zone` where given. */

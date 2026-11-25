@@ -228,26 +228,12 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
             new Date('2026-01-01T00:00:00.000Z'),
             new Date('2026-02-01T00:00:00.000Z')
         ];
-        if ([DatabaseType.NEO4J, DatabaseType.MEMGRAPH].includes(engine.type)) {
-            // Made by Cypher's datetime() on Neo4j and Memgraph, whose drivers send a JavaScript Date as an empty map, which
-            // a save can't write. Whole seconds with no fraction, as Memgraph's datetime() reads no fraction before `Z`.
-            for (const [i, due] of dates.entries()) {
-                const at = `datetime('${due.toISOString().replace('.000Z', 'Z')}')`;
-                await pm.execute(
-                    new QuerySpecification({
-                        text: `CREATE (:GroupTest:DatedItem {id: 'd${i}', shelf: 'one', due_at: ${at}, undeclared: ${at}})`,
-                        language: 'CYPHER'
-                    })
-                );
-            }
-            await gom.save(Object.assign(new DatedItem(), { id: 'd3', shelf: 'one' }));
-        } else {
-            await gom.saveAll(
-                [...dates.map((due, i) => ({ id: `d${i}`, due, undeclared: due })), { id: 'd3' }].map((it) =>
-                    Object.assign(new DatedItem(), { shelf: 'one', ...it })
-                )
-            );
-        }
+        // Saved on every store, Neo4j and Memgraph among them, whose driver sent a Date as an empty map (#810).
+        await gom.saveAll(
+            [...dates.map((due, i) => ({ id: `d${i}`, due, undeclared: due })), { id: 'd3' }].map((it) =>
+                Object.assign(new DatedItem(), { shelf: 'one', ...it })
+            )
+        );
         const [group] = await gom.groups.load(DatedItem, (q: any) => ({
             keys: { shelf: key(q.shelf) },
             aggregates: {
