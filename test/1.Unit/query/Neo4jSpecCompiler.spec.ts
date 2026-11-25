@@ -32,6 +32,19 @@ describe('Neo4jSpecCompiler', () => {
             expect(neo4j.isDateTime(compiled([at])['1'])).toBe(true);
         });
 
+        it('binds a Date before 1970, before 1 AD and past 9999 as the same instant', () => {
+            for (const iso of [
+                '1969-12-31T23:59:59.999Z',
+                '-000500-03-04T05:06:07.089Z',
+                '+012345-03-04T05:06:07.089Z'
+            ]) {
+                const date = new Date(iso);
+                const bound = compiled({ at: date }).at;
+                expect(neo4j.isDateTime(bound)).toBe(true);
+                expect(new Date(bound.toString()).getTime()).toEqual(date.getTime());
+            }
+        });
+
         it('binds an invalid Date as null', () => {
             expect(compiled({ at: new Date(Number.NaN) }).at).toBeNull();
         });

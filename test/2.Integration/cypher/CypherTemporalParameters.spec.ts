@@ -101,6 +101,17 @@ describe.each(stores())('A temporal parameter on $type', (store) => {
         ).toEqual([['-0005-01-15', true, '-0044-03-15T10:00:00Z']]);
     });
 
+    it('should be a JavaScript Date as the datetime at an offset of zero, alone, in a list and in a map (#810)', async () => {
+        const at = new Date('2024-01-15T10:00:00.089Z');
+        expect(
+            await query(
+                "RETURN [toString($at), $at = datetime('2024-01-15T10:00:00.089Z'), " +
+                    "[$l][0][0] = datetime('2024-01-15T10:00:00.089Z'), $m.at.year, $invalid IS NULL]",
+                { at, l: [at], m: { at }, invalid: new Date(Number.NaN) }
+            )
+        ).toEqual([['2024-01-15T10:00:00.089Z', true, true, 2024, true]]);
+    });
+
     it('should be written and read back as the value it is', async () => {
         await query('CREATE (:CyTemporalParameter {d: $d, t: $t})', {
             d: new Duration(0, 1, 0, 0),
