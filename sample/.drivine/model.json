@@ -3,7 +3,7 @@
   "format": "drivine-model/1",
   "generator": {
     "library": "drivine",
-    "version": "6.0.0",
+    "version": "7.0.0",
     "language": "typescript"
   },
   "module": "drivine-sample",
