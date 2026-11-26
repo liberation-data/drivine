@@ -45,6 +45,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { rangesPerProperty, SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
 import { OracleBackend } from '@/backend/oracle/OracleBackend';
+import { OracleIndexedProperties } from '@/backend/oracle/OracleIndexedProperties';
 import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
 import { SqliteBackend } from '@/backend/sqlite/SqliteBackend';
 import { ensuredFirst, ensureStore } from '@/manager/EnsuredStore';
@@ -310,7 +311,12 @@ export class StatelessGraphObjectManager {
                               copies.fillIn(label, properties, true)
                       }
                     : {}),
-                changed: () => this.indexAdvisor.refresh()
+                changed: () => {
+                    this.indexAdvisor.refresh();
+                    if (this.backend instanceof OracleBackend) {
+                        OracleIndexedProperties.changed(this.backend.graph.name);
+                    }
+                }
             }
         };
     }

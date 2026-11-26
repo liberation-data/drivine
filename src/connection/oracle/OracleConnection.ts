@@ -13,6 +13,7 @@ import { CompiledRows } from '@/cypher/CompiledCypher';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
+import { OracleIndexedProperties } from '@/backend/oracle/OracleIndexedProperties';
 import { DrivineError } from '@/DrivineError';
 import { StoredFunctionCalls } from '@/backend/GraphStatement';
 import { readLayoutAfter, readLayoutOf } from '@/cypher/ValueLayout';
@@ -108,14 +109,16 @@ export class OracleConnection implements Connection {
     }
 
     /**
-     * The Cypher statement `given` compiled for Oracle, calling the functions the graph's store keeps where the
+     * The Cypher statement `given` compiled for Oracle, with the graph's labelled indexes, so a key equality is read
+     * through its index (see {@link OracleIndexedProperties}), calling the functions the graph's store keeps where the
      * statement needs one and the session may call it, and compiled again to call none of those it may not: see
      * {@link OracleStoredFunctions}.
      */
     private async compiled<T>(given: QuerySpecification<T>): Promise<CompiledSpecification<T>> {
         // Read once, for both compiles: an iterator in them gives its items only once (#662).
         const parameters = cypherParameters(given);
-        const compiler = new SharedCypherCompiler('oracle', { name: this.graph });
+        const indexedProperties = await OracleIndexedProperties.of(this.connection, this.database, this.graph);
+        const compiler = new SharedCypherCompiler('oracle', { name: this.graph, indexedProperties });
         const compiled = compiledSpecification(given, compiler, parameters);
         // Each is asked of apart: a store an earlier version made may have the one and not the others.
         const nullsEqual =
@@ -128,7 +131,12 @@ export class OracleConnection implements Connection {
         }
         return compiledSpecification(
             given,
-            new SharedCypherCompiler('oracle', { name: this.graph, nullsEqualStored: nullsEqual, eraStored: era }),
+            new SharedCypherCompiler('oracle', {
+                name: this.graph,
+                indexedProperties,
+                nullsEqualStored: nullsEqual,
+                eraStored: era
+            }),
             parameters
         );
     }

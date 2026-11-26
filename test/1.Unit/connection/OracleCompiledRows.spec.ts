@@ -1,3 +1,4 @@
+import { OracleIndexedProperties } from '@/backend/oracle/OracleIndexedProperties';
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -35,6 +36,10 @@ const EACH = { implicitResults: [[{ RESULT: 1 }, { RESULT: { a: [2, 'x'] } }, { 
  * name (liberation-data/drivine#673).
  */
 describe('The rows of a compiled Oracle write', () => {
+    // What the catalog lists of the graph's labelled indexes is read apart (see OracleIndexedProperties): none here.
+    beforeEach(() => jest.spyOn(OracleIndexedProperties, 'of').mockResolvedValue([]));
+    afterEach(() => jest.restoreAllMocks());
+
     it("should read 'one' as the items of the one row's rows:json", async () => {
         expect(await compiledAs(connection(session(ONE)), block('one'))).toEqual([1, { a: [2, 'x'] }, null]);
     });
