@@ -86,7 +86,7 @@ describeOnOracle("A Cypher statement on Oracle, compiled with the graph's labell
         await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
     });
 
-    it('reads each keyed node through the index once the index is made, and not before', async () => {
+    it('reads each keyed node through the index once the index is made, and not once it is dropped', async () => {
         expect((await gom.indexes.ensure(INDEX)).status).toEqual('CREATED');
         const index = await labelledIndex();
         const withIndex = await keyedPlan();

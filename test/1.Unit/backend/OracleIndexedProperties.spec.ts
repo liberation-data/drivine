@@ -1,5 +1,13 @@
 import { OracleIndexedProperties } from '@/backend/oracle/OracleIndexedProperties';
 import { storeStatements } from '@/backend/StoreStatements';
+import { DrivineLogger } from '@/logger/DrivineLogger';
+import { OracleBackend } from '@/backend/oracle/OracleBackend';
+import { OracleGraph } from '@/backend/oracle/OracleGraph';
+import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
+import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
+import { GraphBackend } from '@/backend/GraphBackend';
+import { ModelRegistry } from '@/model/ModelRegistry';
+import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
 
 /** A connection that answers the catalog's query with `rows`, or fails with `error`, and counts what it's asked. */
 const catalog = (rows: () => unknown[], error?: () => unknown) => {
@@ -41,7 +49,11 @@ describe('OracleIndexedProperties (#753)', () => {
             // A JSON column read as text.
             { ROW: JSON.stringify({ kind: 'RANGE_INDEX', label: 'City', properties: ['name'] }) },
             // Read as an array row too.
-            [{ kind: 'RANGE_INDEX', label: 'Tag', properties: ['slug'] }]
+            [{ kind: 'RANGE_INDEX', label: 'Tag', properties: ['slug'] }],
+            // None to tell the compiler of: no row, and an item without a label or a property.
+            { ROW: null },
+            row('', ['x']),
+            row('Empty', [])
         ]);
         expect(await OracleIndexedProperties.of(connection, 'db', g)).toEqual([
             ['Person', 'email'],
@@ -102,14 +114,87 @@ describe('OracleIndexedProperties (#753)', () => {
         expect(connection.asked).toEqual(2);
     });
 
-    it('fails as the read fails for any other reason, and reads again next time', async () => {
+    it("compiles without them where the catalog can't be read, keeps what was read before, and says so once", async () => {
         const g = next();
-        const refused = catalog(
-            () => [],
-            () => Object.assign(new Error('ORA-01031: insufficient privileges'), { errorNum: 1031 })
-        );
-        await expect(OracleIndexedProperties.of(refused, 'db', g)).rejects.toThrow('ORA-01031');
-        const healthy = catalog(() => [row('A', ['x'])]);
-        expect(await OracleIndexedProperties.of(healthy, 'db', g)).toEqual([['A', 'x']]);
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        jest.spyOn(DrivineLogger.prototype, 'debug').mockImplementation(() => undefined);
+        try {
+            const refused = catalog(
+                () => [],
+                () => Object.assign(new Error('ORA-01031: insufficient privileges'), { errorNum: 1031 })
+            );
+            expect(await OracleIndexedProperties.of(refused, 'db', g)).toEqual([]);
+            // Kept until it lapses, as a read that worked is.
+            expect(await OracleIndexedProperties.of(refused, 'db', g)).toEqual([]);
+            expect(refused.asked).toHaveLength(1);
+            const healthy = catalog(() => [row('A', ['x'])]);
+            now = OracleIndexedProperties.FRESH_FOR_MS;
+            expect(await OracleIndexedProperties.of(healthy, 'db', g)).toEqual([['A', 'x']]);
+            now = 2 * OracleIndexedProperties.FRESH_FOR_MS;
+            expect(await OracleIndexedProperties.of(refused, 'db', g)).toEqual([['A', 'x']]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn.mock.calls[0][0]).toContain('ORA-01031');
+        } finally {
+            jest.restoreAllMocks();
+        }
+    });
+
+    it('keeps a read begun after an index was made or dropped, though one begun before finds no schema table', async () => {
+        const g = next();
+        const answers: Array<(it: { rows: unknown[] } | Error) => void> = [];
+        const connection = {
+            asked: 0,
+            execute: async (): Promise<{ rows: unknown[] }> => {
+                connection.asked++;
+                return new Promise((resolve, reject) =>
+                    answers.push((it) => (it instanceof Error ? reject(it) : resolve(it)))
+                );
+            }
+        };
+        const before = OracleIndexedProperties.of(connection, 'db', g);
+        OracleIndexedProperties.changed(g);
+        const after = OracleIndexedProperties.of(connection, 'db', g);
+        answers[1]({ rows: [row('A', ['x'])] });
+        expect(await after).toEqual([['A', 'x']]);
+        answers[0](Object.assign(new Error('ORA-00942: table or view does not exist'), { errorNum: 942 }));
+        expect(await before).toEqual([]);
+        // Asked at once, and the same answer, of a second statement meanwhile.
+        expect(await Promise.all([1, 2].map(async () => OracleIndexedProperties.of(connection, 'db', g)))).toEqual([
+            [['A', 'x']],
+            [['A', 'x']]
+        ]);
+        expect(connection.asked).toEqual(2);
+    });
+
+    it('takes a graph named in either case as one, as Oracle does', async () => {
+        const g = next();
+        let listed = [row('A', ['x'])];
+        const connection = catalog(() => listed);
+        expect(await OracleIndexedProperties.of(connection, 'db', g)).toEqual([['A', 'x']]);
+        expect(await OracleIndexedProperties.of(connection, 'db', g.toUpperCase())).toEqual([['A', 'x']]);
+        expect(connection.asked).toHaveLength(1);
+        listed = [];
+        OracleIndexedProperties.changed(g.toUpperCase());
+        expect(await OracleIndexedProperties.of(connection, 'db', g)).toEqual([]);
+    });
+});
+
+describe("The object manager's schema plan (#753)", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    /** What the manager's plan tells its host once a statement has made or dropped an index or constraint. */
+    const changedOn = (backend: GraphBackend): void => {
+        const pm = { database: 'db', type: 'ORACLE' } as any;
+        // No statement is run here: the executor a plan runs its statements with is none.
+        jest.spyOn(StatelessGraphObjectManager.prototype as any, 'schemaExecutor').mockReturnValue({});
+        new StatelessGraphObjectManager(pm, backend, new ModelRegistry()).schemaPlanning().host.changed!();
+    };
+
+    it("has an Oracle graph's labelled indexes read again once one is made or dropped, and no other store's", () => {
+        const changed = jest.spyOn(OracleIndexedProperties, 'changed');
+        changedOn(new OracleBackend(new OracleGraph('planned')));
+        expect(changed.mock.calls).toEqual([['planned']]);
+        changedOn(new PostgresBackend(new PostgresGraph('planned')));
+        expect(changed).toHaveBeenCalledTimes(1);
     });
 });

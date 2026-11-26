@@ -131,8 +131,6 @@ describe('The Oracle version, read on the first connection', () => {
     beforeEach(() => jest.spyOn(OracleIndexedProperties, 'of').mockResolvedValue([]));
     afterEach(() => jest.restoreAllMocks());
 
-    afterEach(() => jest.restoreAllMocks());
-
     it('should refuse an Oracle older than 23.9 with the version it is and why, and not 23.9 or later', () => {
         expect(oracleRefusal(server('23.8.0.25.4'))).toEqual(
             'Drivine needs Oracle 23.9 or later (it uses UUID()); this database is 23.8.0.25.4. ' +

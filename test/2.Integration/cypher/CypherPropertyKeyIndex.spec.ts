@@ -87,9 +87,8 @@ function oraclePlanner(store: SqlStore): Planner {
     const graph = GRAPH.toUpperCase();
     return {
         /**
-         * Compiled knowing the indexes the graph has, which a statement the connection runs is not yet
-         * (liberation-data/drivine4j#638): its rows are found as before, without the index, which the tests of rows here
-         * check stays so.
+         * Compiled knowing the indexes the graph has, as a statement the connection runs is (#753), and Odd's and
+         * Scaled's, which it has none of: the tests of rows here check its rows are found as without the index.
          */
         compiled: (cypher, parameters) =>
             new SharedCypherCompiler('oracle', {
@@ -472,8 +471,8 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
                 // Its reads, planned as a query: a write compiles to a procedure, which no EXPLAIN takes.
                 const plan = await planner.plan(planner.compiled(apocBatch(0, 20, 'RETURN start, finish'), {}));
                 expect(planner.probesIndex(plan) ? 'probes' : plan).toEqual('probes');
-                // Not on Oracle: the connection compiles with no index named (liberation-data/drivine4j#638), and a batch of 20
-                // took 231 s there over 2,000 nodes of the label (#636).
+                // Not on Oracle: a batch of 20 took 231 s there over 2,000 nodes of the label (#636), compiled with no index
+                // named, as the connection compiled it before #753.
                 if (store.type === DatabaseType.ORACLE) {
                     return;
                 }
@@ -492,8 +491,8 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
 
         it('finds, compiled knowing the indexes, the rows it finds compiled as the connection compiles it', async () => {
             // On Postgres the connection compiles as the planner does, and the tests above find its rows. On Oracle the
-            // connection names no index (liberation-data/drivine4j#638), so the labelled index's test is run here: no row
-            // it leaves out may be one the JSON comparison keeps, as `1` and `1.0`, or a double and a number, are.
+            // labelled index's test is run here against the statement compiled with no index named: no row it leaves out
+            // may be one the JSON comparison keeps, as `1` and `1.0`, or a double and a number, are.
             if (store.type !== DatabaseType.ORACLE) {
                 return;
             }

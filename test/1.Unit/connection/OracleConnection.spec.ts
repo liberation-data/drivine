@@ -80,6 +80,20 @@ describe('OracleConnection', () => {
         expect(it.execute.mock.calls.map(([run]) => run as string)).toContain(sql);
     });
 
+    it('should keep the labelled indexes when it compiles again to call none of the store (#753)', async () => {
+        const g = graph();
+        const indexed: Array<[string, string]> = [['Person', 'email']];
+        jest.spyOn(OracleIndexedProperties, 'of').mockResolvedValue(indexed);
+        const it = session(904);
+        const keyed = "MATCH (n:Person {email: 'a@b'}) WITH n, [null] AS a, [1] AS b RETURN a = b";
+        await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(cypher(keyed));
+        const options = { name: g, nullsEqualStored: false, eraStored: true };
+        const sql = new SharedCypherCompiler('oracle', { ...options, indexedProperties: indexed }).compile(keyed).sql;
+        expect(sql).not.toEqual(new SharedCypherCompiler('oracle', options).compile(keyed).sql);
+        expect(sql).toContain('cy_nulls_equal(');
+        expect(it.execute.mock.calls.map(([run]) => run as string)).toContain(sql);
+    });
+
     it("should call the store's function where the session may call it", async () => {
         const g = graph();
         const it = session('found');
