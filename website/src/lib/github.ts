@@ -137,7 +137,7 @@ export interface Download {
 export interface StudioRelease {
     version: string;
     url: string;
-    mac: { appleSilicon?: Download; intel?: Download };
+    mac: { appleSilicon?: Download };
     linux: Download[];
 }
 
@@ -165,7 +165,6 @@ async function fetchStudioRelease(): Promise<StudioRelease | undefined> {
     };
     const mac = {
         appleSilicon: download((name) => name.endsWith('.dmg') && name.includes('arm64'), 'Apple Silicon'),
-        intel: download((name) => name.endsWith('.dmg') && name.includes('x64'), 'Intel'),
     };
     // The two native installers, labelled by the distros that use them. A software-centre can't open a local package on
     // current Fedora/GNOME, so the page's install hint gives the terminal command for each.
@@ -174,7 +173,7 @@ async function fetchStudioRelease(): Promise<StudioRelease | undefined> {
         download((name) => name.endsWith('.rpm'), 'Fedora / RHEL'),
     ].filter((d): d is Download => d !== undefined);
     // A release with no installer for any platform is no download: the page falls back to building from source.
-    if (!mac.appleSilicon && !mac.intel && linux.length === 0) {
+    if (!mac.appleSilicon && linux.length === 0) {
         return undefined;
     }
     return { version, url: release.html_url, mac, linux };
