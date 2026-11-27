@@ -30,6 +30,14 @@ describe('OracleSpecCompiler', () => {
             'SELECT :b0 FROM dual -- a note\n/* drivine: binary doubles b0 */'
         );
         expect(compiled('SELECT $a FROM dual', { a: 2.5 }).statement).toEqual('SELECT :b0 FROM dual');
+        // One the statement doesn't name isn't bound, and one in a list is in its JSON text: neither is named.
+        expect(compiled('SELECT $b, $c FROM dual', { a: NaN, b: [Infinity], c: 1 }).statement).toEqual(
+            'SELECT :b1, :b2 FROM dual'
+        );
+        const paged = new QuerySpecification('SELECT $a FROM dual').bind({ a: NaN }).skip(1).limit(2);
+        expect(new OracleSpecCompiler(paged.finalizedCopy('SQL')).compile().statement).toEqual(
+            'SELECT :b0 FROM dual OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY\n/* drivine: binary doubles b0 */'
+        );
     });
 
     it('binds a text a VARCHAR2 holds as itself, measured in bytes', () => {

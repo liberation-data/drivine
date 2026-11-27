@@ -31,9 +31,11 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
             const index = names.indexOf(name);
             return index >= 0 ? `:b${index}` : undefined;
         });
-        const doubles = Object.entries(this.formattedParams())
-            .filter(([, value]) => value?.type === oracledb.DB_TYPE_BINARY_DOUBLE)
-            .map(([name]) => name);
+        // Read from the parameters, not their binds: binding one again would write a list or a map's JSON text again.
+        const used = parameterNames(this.spec.statement.text);
+        const doubles = names.flatMap((name, index) =>
+            used.has(name) && nonFinite(this.named()[name]) ? [`b${index}`] : []
+        );
         return doubles.length
             ? `${statement.trimEnd()}\n/* drivine: binary doubles ${doubles.join(',')} */`
             : statement;
@@ -73,7 +75,8 @@ const MAX_STRING = 32_767;
  * as a CLOB, as drivine4j binds one (a Cypher statement's parameters are one JSON text). A number that is NaN or an
  * infinity is bound as a `BINARY_DOUBLE`, which holds them: node-oracledb binds a number as a `NUMBER`, which holds
  * neither, and refused NaN (NJS-105) and bound Infinity as -1 and -Infinity as -101101101101, with no error (#865). A
- * finite number is still a `NUMBER`.
+ * finite number is still a `NUMBER`. drivine-python binds them so too (liberation-data/drivine-python#599); drivine4j
+ * refuses them on plain SQL (liberation-data/drivine4j#906).
  *
  * A statement that binds one is kept apart from its `NUMBER`-bound runs by a comment naming those binds (see
  * {@link OracleSpecCompiler.formattedStatement}): shared with one that bound a `NUMBER` for the same name, Oracle's
@@ -85,7 +88,7 @@ function bindable(value: any): any {
     if (value === undefined) {
         return null;
     }
-    if (typeof value === 'number' && !Number.isFinite(value)) {
+    if (nonFinite(value)) {
         return { type: oracledb.DB_TYPE_BINARY_DOUBLE, val: value };
     }
     if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Buffer.isBuffer(value)) {
@@ -95,4 +98,9 @@ function bindable(value: any): any {
         return { type: oracledb.CLOB, val: value };
     }
     return value;
+}
+
+/** Whether `value` is a number that is NaN or an infinity, which {@link bindable} binds as a `BINARY_DOUBLE`. */
+function nonFinite(value: unknown): value is number {
+    return typeof value === 'number' && !Number.isFinite(value);
 }
