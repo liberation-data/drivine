@@ -8,7 +8,30 @@ function bound(value: any): any {
     return new OracleSpecCompiler(spec).compile().parameters.b0;
 }
 
+/** The statement and the binds `sql` compiles to, given `parameters`. */
+function compiled(sql: string, parameters: Record<string, unknown>): { statement: string; parameters: any } {
+    return new OracleSpecCompiler(new QuerySpecification(sql).bind(parameters).finalizedCopy('SQL')).compile();
+}
+
 describe('OracleSpecCompiler', () => {
+    it('binds a number that is NaN or an infinity as a BINARY_DOUBLE, which holds them, and a finite one as itself (#865)', () => {
+        for (const value of [NaN, Infinity, -Infinity]) {
+            expect(bound(value)).toEqual({ type: oracledb.DB_TYPE_BINARY_DOUBLE, val: value });
+        }
+        expect(bound(2.5)).toEqual(2.5);
+        expect(bound(7)).toEqual(7);
+    });
+
+    it('keeps a statement that binds a BINARY_DOUBLE apart, by a comment of its own line naming those binds (#865)', () => {
+        expect(compiled('SELECT $a, $b, $c FROM dual', { a: Infinity, b: 1, c: NaN }).statement).toEqual(
+            'SELECT :b0, :b1, :b2 FROM dual\n/* drivine: binary doubles b0,b2 */'
+        );
+        expect(compiled('SELECT $a FROM dual -- a note', { a: -Infinity }).statement).toEqual(
+            'SELECT :b0 FROM dual -- a note\n/* drivine: binary doubles b0 */'
+        );
+        expect(compiled('SELECT $a FROM dual', { a: 2.5 }).statement).toEqual('SELECT :b0 FROM dual');
+    });
+
     it('binds a text a VARCHAR2 holds as itself, measured in bytes', () => {
         // 32,767 bytes in UTF-8: the most a PL/SQL VARCHAR2 holds.
         const text = `${'é'.repeat(16_383)}a`;

@@ -263,6 +263,55 @@ describeOnOracle('Oracle connection', () => {
         }
     });
 
+    it('should bind a NaN or an infinity as the number it is, read back, compared and stored, and a finite one as before (#865)', async () => {
+        const one = async (value: number): Promise<number> =>
+            pm.getOne<number>(new QuerySpecification('SELECT $v AS "v" FROM dual').bind({ v: value }));
+        expect(await one(NaN)).toBeNaN();
+        expect(await one(Infinity)).toBe(Infinity);
+        expect(await one(-Infinity)).toBe(-Infinity);
+        expect(await one(2.5)).toBe(2.5);
+        expect(
+            await pm.getOne<any>(
+                new QuerySpecification(
+                    'SELECT CASE WHEN $i > 1e100 THEN 1 ELSE 0 END AS "above", CASE WHEN $n < 0 THEN 1 ELSE 0 END AS "below" FROM dual'
+                ).bind({ i: Infinity, n: -Infinity })
+            )
+        ).toEqual({ above: 1, below: 1 });
+        await pm.execute(new QuerySpecification('CREATE TABLE drivine_nonfinite (v BINARY_DOUBLE)'));
+        try {
+            for (const value of [Infinity, -Infinity, NaN]) {
+                await pm.execute(
+                    new QuerySpecification('INSERT INTO drivine_nonfinite (v) VALUES ($v)').bind({ v: value })
+                );
+            }
+            const rows = await pm.query<number>(new QuerySpecification('SELECT v AS "v" FROM drivine_nonfinite'));
+            expect(rows.filter((it) => !Number.isNaN(it)).sort((a, b) => a - b)).toEqual([-Infinity, Infinity]);
+            expect(rows.filter((it) => Number.isNaN(it))).toHaveLength(1);
+        } finally {
+            await pm.execute(new QuerySpecification('DROP TABLE drivine_nonfinite'));
+        }
+    });
+
+    it('should take an infinity after a finite number and an integer on one statement, through a query and a cursor (#865)', async () => {
+        // Run with a NUMBER between two BINARY_DOUBLEs, one text failed the last, ORA-01426 (drivine-python#575).
+        const statement = 'SELECT $v AS "v" FROM dual WHERE 1 = 1';
+        for (const value of [Infinity, 2.5, 7, -Infinity]) {
+            expect(await pm.getOne<number>(new QuerySpecification(statement).bind({ v: value }))).toBe(value);
+        }
+        const connection = await DatabaseRegistry.getInstance().connectionProvider('ORACLE')!.connect();
+        try {
+            const cursor = await connection.openCursor<any>(new CursorSpecification(statement).bind({ v: Infinity }));
+            const seen: number[] = [];
+            for await (const row of cursor) {
+                seen.push(row);
+            }
+            await cursor.close();
+            expect(seen).toEqual([Infinity]);
+        } finally {
+            await connection.release();
+        }
+    });
+
     it("should find the test image is Oracle 23.9 or later, from the driver's version, and run Cypher's randomUUID", async () => {
         // The driver reads the version as it connects, which needs no grant (#428, as liberation-data/drivine4j#401).
         const connection = await DatabaseRegistry.getInstance().connectionProvider('ORACLE')!.connect();

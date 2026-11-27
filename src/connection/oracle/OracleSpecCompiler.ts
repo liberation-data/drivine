@@ -27,10 +27,16 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
      */
     formattedStatement(): string {
         const names = Object.keys(this.named());
-        return replaceParameters(this.appliedStatement(), (name) => {
+        const statement = replaceParameters(this.appliedStatement(), (name) => {
             const index = names.indexOf(name);
             return index >= 0 ? `:b${index}` : undefined;
         });
+        const doubles = Object.entries(this.formattedParams())
+            .filter(([, value]) => value?.type === oracledb.DB_TYPE_BINARY_DOUBLE)
+            .map(([name]) => name);
+        return doubles.length
+            ? `${statement.trimEnd()}\n/* drivine: binary doubles ${doubles.join(',')} */`
+            : statement;
     }
 
     formattedParams(): Record<string, any> {
@@ -64,11 +70,23 @@ const MAX_STRING = 32_767;
 
 /**
  * A value as Oracle binds it: a list or a map as its JSON text, and a text a `VARCHAR2` can't hold, measured in bytes,
- * as a CLOB, as drivine4j binds one (a Cypher statement's parameters are one JSON text).
+ * as a CLOB, as drivine4j binds one (a Cypher statement's parameters are one JSON text). A number that is NaN or an
+ * infinity is bound as a `BINARY_DOUBLE`, which holds them: node-oracledb binds a number as a `NUMBER`, which holds
+ * neither, and refused NaN (NJS-105) and bound Infinity as -1 and -Infinity as -101101101101, with no error (#865). A
+ * finite number is still a `NUMBER`.
+ *
+ * A statement that binds one is kept apart from its `NUMBER`-bound runs by a comment naming those binds (see
+ * {@link OracleSpecCompiler.formattedStatement}): shared with one that bound a `NUMBER` for the same name, Oracle's
+ * cursor for the text, made for a `BINARY_DOUBLE`, takes the `NUMBER` for its next run, and then reads the next
+ * `BINARY_DOUBLE` as a `NUMBER`, failing it with ORA-01426 (liberation-data/drivine-python#575). On a line of its own,
+ * so no comment the statement ends with takes it in.
  */
 function bindable(value: any): any {
     if (value === undefined) {
         return null;
+    }
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+        return { type: oracledb.DB_TYPE_BINARY_DOUBLE, val: value };
     }
     if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Buffer.isBuffer(value)) {
         return bindable(jsonText(value));
