@@ -55,7 +55,7 @@ const SITE = 'https://drivine.org/';
 const VIDEO_SHARE = new URL('#watch', SITE).href;
 const SHARE_TEXT = 'Drivine: graph RAG on any database. Build AI apps on the database you already run.';
 
-import { REPOS, STUDIO, STUDIO_GET, formatStars, releasedTrain, repoUrl, stars, starsOf, studioRelease, studioUrl, trainUrl } from '../lib/github';
+import { CLI_REPO_URL, REPOS, STUDIO, STUDIO_GET, cliRelease, formatStars, releasedTrain, repoUrl, stars, starsOf, studioRelease, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
@@ -64,9 +64,12 @@ const starLabel = (count: number | undefined) => (count === undefined ? '' : for
 // The newest released train, named under the installs and versioning them: without one, neither, and the installs take
 // the latest of each.
 const train = await releasedTrain();
-// Drivine Studio's latest release and the installers it attached, for the download buttons in the Studio section. None,
-// and that section falls back to building from source.
+// Drivine Studio's latest release and the installers it attached, and the drivine CLI's native binaries, for the
+// buttons in the Download section. None, and that section falls back to building from source.
 const studio = await studioRelease();
+const cli = await cliRelease();
+// The hero's and closing call's download link: into the Download section, or to its "on their way" note.
+const downloadHref = `${base}#download`;
 const drivine4jVersion = train?.libraries.drivine4j ?? '<version>';
 // The hero's installs, each pinned to the train's version of its library, so the three copied together work together.
 const pinned = (library: string, at: string) => (train?.libraries[library] ? `${at}${train.libraries[library]}` : '');
@@ -254,6 +257,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .installs .copy.done::after { content: 'Copied'; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 7px; background: var(--accent); color: var(--ink); font-weight: 700; }
             .train { margin: 18px 0 0; font-size: 14px; color: #cfe3e7; text-shadow: 0 1px 8px rgba(0, 30, 40, 0.5); }
             .train a { color: #fff; font-weight: 500; }
+            .train a.get { text-decoration: underline; text-underline-offset: 3px; }
             .copied-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
             .intro { padding: 96px 32px 72px; }
@@ -391,6 +395,18 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .install-hint { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
             .install-hint code { font-size: 13px; background: var(--paper); padding: 1px 5px; border-radius: 4px; }
             .from-source { margin: 0; font-size: 15px; color: #4a6670; }
+            /* The quiet "Download X ↓" link under each showcase, pointing at the Download section (fornax4j's hero line). */
+            .studio .showcase-get { margin: 0; font-size: 15px; }
+            .studio .showcase-get a { font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+            /* The CLI showcase reuses .studio; its figure holds a terminal transcript rather than a screenshot. */
+            .cli-showcase .terminal { margin: 0; padding: 22px 24px; border-radius: 12px; background: #071e27; border: 1px solid #1c3d48; color: #d7e4e7; font-size: 14px; line-height: 1.7; overflow-x: auto; }
+            .cli-showcase .terminal .p { color: #7fd3c8; }
+            .cli-showcase .terminal .s { color: #c8de8c; }
+            .cli-showcase .terminal .c { color: #8ba3aa; }
+            /* Studio and the CLI downloads, pulled out of the showcases into their own section. */
+            .download { padding: 0 32px 96px; scroll-margin-top: 24px; }
+            .download .wrap { display: flex; flex-direction: column; gap: 40px; }
+            .download header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 
             .backing { padding: 0 32px 72px; }
             .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
@@ -474,11 +490,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     ))}
                     <span class="copied-status" role="status"></span>
                 </div>
-                {train && (
-                    <p class="train">
-                        <a href={trainUrl(train.train)}>Drivine {train.train}</a>
-                    </p>
-                )}
+                <p class="train">
+                    {train && <Fragment><a href={trainUrl(train.train)}>Drivine {train.train}</a> · </Fragment>}
+                    <a href={downloadHref} class="get">Download Studio &amp; the CLI ↓</a>
+                </p>
             </div>
         </header>
 
@@ -709,11 +724,53 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <Image src={studioCypher} widths={[800, 1572]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's desktop app on a Mac, its Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station China Town chosen and its properties shown beside the graph" />
                         <figcaption>Cypher on Postgres, compiled to SQL by Drivine: the metro network from <a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock ’n’ Roll Traffic Routing, with Neo4j</a>, now on any store. The station chosen is shown beside it.</figcaption>
                     </figure>
+                    <p class="showcase-get"><a href={downloadHref}>Download Drivine Studio ↓</a></p>
+                </div>
+            </section>
+
+            <section class="studio cli-showcase">
+                <div class="wrap">
+                    <header>
+                        <p class="eyebrow">DRIVINE CLI</p>
+                        <h2>Cypher on any store, from your shell.</h2>
+                        <p>
+                            <code>drivine</code> is a <a href="https://neo4j.com/docs/operations-manual/current/cypher-shell/">cypher-shell</a> drop-in:
+                            run Cypher from an argument, a file or stdin against any store Drivine reaches — Neo4j, Memgraph,
+                            FalkorDB, Postgres, Oracle or SQLite — and on Postgres, Oracle and SQLite it compiles the Cypher to
+                            SQL, exactly as an application does. Results print as a table, plain text, JSON or CSV.
+                        </p>
+                        <ul class="writers">
+                            <li><span><strong>cypher-shell's flags</strong> — <code>-a</code>, <code>-u</code>, <code>-d</code>, <code>-f</code>, <code>--format</code>, <code>-P</code> — so a script written for one runs on the other</span></li>
+                            <li><span><strong>One native binary, no JVM</strong>, signed and notarized on macOS</span></li>
+                            <li><span><strong>Scriptable now</strong>; the interactive REPL is on its way</span></li>
+                        </ul>
+                    </header>
+                    <figure>
+                        <pre class="terminal" aria-label="Two drivine commands and their output"><span class="c"># Cypher straight at SQLite, printed as JSON</span>
+<span class="p">$</span> drivine -a sqlite::memory: --format json <span class="s">'RETURN 1 AS n'</span>
+&#123;"columns":["n"],"rows":[[1]]&#125;
+
+<span class="c"># The same Cypher, compiled to SQL on Postgres</span>
+<span class="p">$</span> drivine -a postgresql://localhost/graphs -u drivine \
+    <span class="s">'MATCH (n:Person) RETURN count(n) AS people'</span></pre>
+                        <figcaption>One command, any store. The contract it follows is drivine-cypher-spec's <a href="https://github.com/liberation-data/drivine-cypher-spec/tree/main/cli">CLI spec</a>.</figcaption>
+                    </figure>
+                    <p class="showcase-get"><a href={downloadHref}>Get the drivine CLI ↓</a></p>
+                </div>
+            </section>
+
+            <section class="download" id="download">
+                <div class="wrap">
+                    <header>
+                        <p class="eyebrow">DOWNLOAD</p>
+                        <h2>Get Drivine Studio and the CLI.</h2>
+                    </header>
+
                     {studio ? (
                         <div class="get-studio" id="get-studio">
                             <p class="get-studio-head">
-                                <strong>Download Drivine Studio.</strong>
-                                <span class="get-studio-sub">Alpha {studio.version}.{(studio.mac.appleSilicon || studio.mac.intel) && ' The macOS builds are signed and notarized — they open without a Gatekeeper prompt.'}</span>
+                                <strong>Drivine Studio</strong>
+                                <span class="get-studio-sub">Desktop app · Alpha {studio.version}.{(studio.mac.appleSilicon || studio.mac.intel) && ' The macOS builds are signed and notarized — they open without a Gatekeeper prompt.'}</span>
                             </p>
                             <div class="downloads">
                                 {(studio.mac.appleSilicon || studio.mac.intel) && (
@@ -749,7 +806,30 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             <p class="from-source">On Windows, or want another build? <a href={STUDIO_GET.url}>Build it from source →</a></p>
                         </div>
                     ) : (
-                        <p class="note">Early days: <a href={STUDIO_GET.url}>build it from source</a> for macOS, Windows or Linux.</p>
+                        <p class="note"><strong>Drivine Studio</strong> — early days: <a href={STUDIO_GET.url}>build it from source</a> for macOS, Windows or Linux.</p>
+                    )}
+
+                    {cli ? (
+                        <div class="get-studio">
+                            <p class="get-studio-head">
+                                <strong>drivine CLI</strong>
+                                <span class="get-studio-sub">A cypher-shell drop-in · Alpha {cli.version} · <a href={cli.url}>release notes</a>.</span>
+                            </p>
+                            <div class="downloads">
+                                <div class="platform">
+                                    <h3>Native binary</h3>
+                                    <div class="dl-buttons">
+                                        {cli.downloads.map((d) => (
+                                            <a class="dl-button" href={d.url}>{d.label} <span class="dl-meta">{d.size}</span></a>
+                                        ))}
+                                    </div>
+                                    <p class="install-hint">Unzip it and put <code>drivine</code> on your <code>PATH</code> (e.g. in <code>/usr/local/bin</code>). The macOS binary is signed and notarized, so it runs with no Gatekeeper prompt.</p>
+                                </div>
+                            </div>
+                            <p class="from-source">More platforms are on their way (<a href={`${CLI_REPO_URL}/issues/707`}>drivine4j #707</a>); until then, <a href={CLI_REPO_URL}>build it from source</a>. Drivine Studio will install the CLI for you — coming soon.</p>
+                        </div>
+                    ) : (
+                        <p class="note"><strong>drivine CLI</strong> — the <code>drivine</code> command, a cypher-shell drop-in, is on its way: <a href={CLI_REPO_URL}>build it from source</a> for now. Drivine Studio will install it for you — coming soon.</p>
                     )}
                 </div>
             </section>

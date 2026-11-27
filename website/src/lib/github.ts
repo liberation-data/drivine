@@ -191,3 +191,60 @@ export function studioRelease(): Promise<StudioRelease | undefined> {
     studio ??= fetchStudioRelease().catch(() => undefined);
     return studio;
 }
+
+/**
+ * The `drivine` command line's latest build and the native binaries attached to it. The CLI ships from drivine4j (its
+ * `drivine4j-cli` module, built with GraalVM to a binary that needs no JVM), so its release is drivine4j's latest, and
+ * its assets are named `drivine-<platform>` — `drivine-macos-arm64` is signed and notarized. More platforms land over
+ * time (drivine4j#707); this picks each one up by name as its asset appears.
+ */
+export interface CliRelease {
+    version: string;
+    url: string;
+    downloads: Download[];
+}
+
+/** The platform label for a `drivine-<platform>` CLI asset, or undefined when the asset isn't a CLI binary. */
+const cliPlatform = (name: string): string | undefined => {
+    if (!/^drivine-/.test(name) || !/\.(zip|tar\.gz|tgz|exe)$/.test(name)) {
+        return undefined;
+    }
+    if (name.includes('macos-arm64') || name.includes('darwin-arm64')) return 'macOS · Apple Silicon';
+    if (name.includes('macos-x64') || name.includes('macos-intel') || name.includes('darwin-x64')) return 'macOS · Intel';
+    if (name.includes('linux-x64') || name.includes('linux-amd64')) return 'Linux · x64';
+    if (name.includes('linux-arm64') || name.includes('linux-aarch64')) return 'Linux · arm64';
+    if (name.includes('windows') || name.endsWith('.exe')) return 'Windows · x64';
+    return undefined;
+};
+
+async function fetchCliRelease(): Promise<CliRelease | undefined> {
+    const release = await githubJson(`repos/${REPOS.jvm.repo}/releases/latest`);
+    const version = typeof release?.tag_name === 'string' ? release.tag_name.replace(/^v/, '') : undefined;
+    if (!version || typeof release.html_url !== 'string') {
+        return undefined;
+    }
+    const assets: Asset[] = Array.isArray(release.assets) ? release.assets : [];
+    const downloads = assets
+        .map((asset): Download | undefined => {
+            const label = cliPlatform(asset.name);
+            return label ? { label, url: asset.browser_download_url, size: megabytes(asset.size) } : undefined;
+        })
+        .filter((download): download is Download => download !== undefined);
+    // No CLI binary attached to the newest drivine4j release: the page says the CLI is on its way and links the repo.
+    return downloads.length > 0 ? { version, url: release.html_url, downloads } : undefined;
+}
+
+let cli: Promise<CliRelease | undefined> | undefined;
+
+/**
+ * The `drivine` CLI's latest build and its binaries, fetched once per build like the stars and the train: the visitor's
+ * browser never calls GitHub. If the fetch fails, or the release has no CLI binary, there is none, and the page says the
+ * CLI is on its way and points at drivine4j, where it's built from source.
+ */
+export function cliRelease(): Promise<CliRelease | undefined> {
+    cli ??= fetchCliRelease().catch(() => undefined);
+    return cli;
+}
+
+/** Where the CLI is built from source and its other builds live: the drivine4j repo. */
+export const CLI_REPO_URL = `https://github.com/${REPOS.jvm.repo}`;
