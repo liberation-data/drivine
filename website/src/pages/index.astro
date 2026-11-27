@@ -70,6 +70,13 @@ const studio = await studioRelease();
 const cli = await cliRelease();
 // The hero's and closing call's download link: into the Download section, or to its "on their way" note.
 const downloadHref = `${base}#download`;
+// Copy-and-paste Linux installs, one command per distro: dnf installs straight from the URL; apt needs the file local first.
+const linuxInstalls = (studio?.linux ?? []).flatMap((d) => {
+    const file = d.url.split('/').pop() ?? '';
+    if (file.endsWith('.rpm')) return [{ distro: 'Fedora / RHEL', command: `sudo dnf install ${d.url}` }];
+    if (file.endsWith('.deb')) return [{ distro: 'Debian / Ubuntu', command: `curl -LO ${d.url} && sudo apt install ./${file}` }];
+    return [];
+});
 const drivine4jVersion = train?.libraries.drivine4j ?? '<version>';
 // The hero's installs, each pinned to the train's version of its library, so the three copied together work together.
 const pinned = (library: string, at: string) => (train?.libraries[library] ? `${at}${train.libraries[library]}` : '');
@@ -407,6 +414,17 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .download { padding: 0 32px 96px; scroll-margin-top: 24px; }
             .download .wrap { display: flex; flex-direction: column; gap: 40px; }
             .download header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+            /* Linux installs as copy/paste one-liners, one per distro. */
+            .linux-installs { display: flex; flex-direction: column; gap: 10px; max-width: 720px; }
+            .linux-install { display: flex; flex-direction: column; gap: 4px; }
+            .linux-distro { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+            .cmd-copy { position: relative; display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+            .cmd-copy:hover, .cmd-copy:focus-visible { border-color: var(--teal); }
+            .cmd-copy:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+            .cmd-copy code { color: var(--ink); background: none; padding: 0; font-size: 13px; overflow-wrap: anywhere; }
+            .cmd-copy svg { flex: none; opacity: 0.6; }
+            .cmd-copy:hover svg, .cmd-copy:focus-visible svg { opacity: 1; }
+            .cmd-copy.done::after { content: 'Copied'; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 7px; background: var(--accent); color: var(--ink); font-weight: 700; }
 
             .backing { padding: 0 32px 72px; }
             .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
@@ -799,11 +817,27 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                                                 <a class="dl-button" href={d.url}>{d.label} <span class="dl-meta">{d.size}</span></a>
                                             ))}
                                         </div>
-                                        <p class="install-hint">A software-centre double-click can't open a local package, so install from a terminal where you downloaded it: <code>sudo dnf&nbsp;install&nbsp;./drivine-studio-linux-x86_64.rpm</code> (Fedora/RHEL) or <code>sudo apt&nbsp;install&nbsp;./drivine-studio-linux-amd64.deb</code> (Debian/Ubuntu).</p>
+                                        {linuxInstalls.length > 0 && (
+                                            <div class="linux-installs">
+                                                {linuxInstalls.map((it) => (
+                                                    <div class="linux-install">
+                                                        <span class="linux-distro">{it.distro}</span>
+                                                        <button type="button" class="cmd-copy" data-copy={it.command} aria-label={`Copy the ${it.distro} install command`}>
+                                                            <code>{it.command}</code>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9z" fill="currentColor" /></svg>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <p class="install-hint">Paste one into a terminal — it fetches the package and installs it. (A software-centre can't open a local package by double-click.)</p>
                                     </div>
                                 )}
+                                <div class="platform">
+                                    <h3>Windows</h3>
+                                    <p class="install-hint">No packaged build yet — <a href={STUDIO_GET.url}>build it from source →</a>.</p>
+                                </div>
                             </div>
-                            <p class="from-source">On Windows, or want another build? <a href={STUDIO_GET.url}>Build it from source →</a></p>
                         </div>
                     ) : (
                         <p class="note"><strong>Drivine Studio</strong> — early days: <a href={STUDIO_GET.url}>build it from source</a> for macOS, Windows or Linux.</p>
@@ -1071,7 +1105,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     }
                 }
             };
-            document.querySelectorAll<HTMLButtonElement>('.installs .copy').forEach((button) => {
+            document.querySelectorAll<HTMLButtonElement>('.installs .copy, .cmd-copy').forEach((button) => {
                 let timer: ReturnType<typeof setTimeout> | undefined;
                 button.addEventListener('click', async () => {
                     const line = button.dataset.copy!;
