@@ -190,6 +190,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 --muted: #3e5a64;
                 --teal: #0f6e7a;
                 --paper: #f6f9f9;
+                /* A subtle cool tint for alternating section bands, between --paper and the #e3eff1 inset panels. */
+                --mist: #e9f1f3;
                 --line: #d5e3e6;
                 --accent: #f08a5d;
             }
@@ -402,16 +404,25 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .install-hint { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
             .install-hint code { font-size: 13px; background: var(--paper); padding: 1px 5px; border-radius: 4px; }
             .from-source { margin: 0; font-size: 15px; color: #4a6670; }
+            /* A quiet open-source star nudge at the foot of the Download section. Points at the flagship repo (REPOS.ts)
+               so stars aren't split across the three libraries. The count is the build-time one, like the library cards. */
+            .star-nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 28px; margin: 4px 0 0; padding: 20px 26px; border-radius: 14px; background: #fff; border: 1px solid var(--line); font-size: 16px; line-height: 1.5; color: var(--muted); }
+            .star-nudge > span { flex: 1 1 320px; min-width: 0; }
+            .star-nudge .star { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 8px 8px 8px 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font-weight: 700; white-space: nowrap; }
+            .star-nudge .star:hover { border-color: var(--teal); color: var(--ink); }
+            .star-nudge .star span { font-size: 14px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: #eef5f6; }
             /* The quiet "Download X ↓" link under each showcase, pointing at the Download section (fornax4j's hero line). */
             .studio .showcase-get { margin: 0; font-size: 15px; }
             .studio .showcase-get a { font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
-            /* The CLI showcase reuses .studio; its figure holds a terminal transcript rather than a screenshot. */
+            /* The CLI showcase reuses .studio; its figure holds a terminal transcript rather than a screenshot.
+               It is a mist band, so the lower sections alternate paper → mist → paper → mist → paper. */
+            .cli-showcase { background: var(--mist); padding: 80px 32px 96px; }
             .cli-showcase .terminal { margin: 0; padding: 22px 24px; border-radius: 12px; background: #071e27; border: 1px solid #1c3d48; color: #d7e4e7; font-size: 14px; line-height: 1.7; overflow-x: auto; }
             .cli-showcase .terminal .p { color: #7fd3c8; }
             .cli-showcase .terminal .s { color: #c8de8c; }
             .cli-showcase .terminal .c { color: #8ba3aa; }
             /* Studio and the CLI downloads, pulled out of the showcases into their own section. */
-            .download { padding: 0 32px 96px; scroll-margin-top: 24px; }
+            .download { padding: 72px 32px 96px; scroll-margin-top: 24px; }
             .download .wrap { display: flex; flex-direction: column; gap: 40px; }
             .download header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
             /* Linux installs as copy/paste one-liners, one per distro. */
@@ -426,9 +437,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .cmd-copy:hover svg, .cmd-copy:focus-visible svg { opacity: 1; }
             .cmd-copy.done::after { content: 'Copied'; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 7px; background: var(--accent); color: var(--ink); font-weight: 700; }
 
-            .backing { padding: 0 32px 72px; }
-            .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
-            .engines { padding: 0 32px 96px; }
+            /* A mist band to match .cli-showcase; its inner card goes white so it still reads as a panel on the tint. */
+            .backing { background: var(--mist); padding: 72px 32px 72px; }
+            .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #fff; border: 1px solid var(--line); }
+            .engines { padding: 56px 32px 96px; }
             .engines .wrap { display: flex; flex-direction: column; gap: 22px; align-items: center; text-align: center; }
             .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
             .chips span { border: 1px solid #b9d0d5; border-radius: 999px; padding: 10px 20px; font-size: 17px; font-weight: 500; background: #fff; }
@@ -752,15 +764,15 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <p class="eyebrow">DRIVINE CLI</p>
                         <h2>Cypher on any store, from your shell.</h2>
                         <p>
-                            <code>drivine</code> is a <a href="https://neo4j.com/docs/operations-manual/current/cypher-shell/">cypher-shell</a> drop-in:
-                            run Cypher from an argument, a file or stdin against any store Drivine reaches — Neo4j, Memgraph,
-                            FalkorDB, Postgres, Oracle or SQLite — and on Postgres, Oracle and SQLite it compiles the Cypher to
-                            SQL, exactly as an application does. Results print as a table, plain text, JSON or CSV.
+                            The <code>drivine</code> CLI runs Cypher from an argument, a file or stdin against any store Drivine
+                            reaches — Neo4j, Memgraph, FalkorDB, Postgres, Oracle or SQLite — and on Postgres, Oracle and SQLite
+                            it compiles the Cypher to SQL, exactly as an application does. Results print as a table, plain text,
+                            JSON or CSV.
                         </p>
                         <ul class="writers">
-                            <li><span><strong>cypher-shell's flags</strong> — <code>-a</code>, <code>-u</code>, <code>-d</code>, <code>-f</code>, <code>--format</code>, <code>-P</code> — so a script written for one runs on the other</span></li>
                             <li><span><strong>One native binary, no JVM</strong>, signed and notarized on macOS</span></li>
                             <li><span><strong>Scriptable now</strong>; the interactive REPL is on its way</span></li>
+                            <li><span><strong>Familiar to Neo4j users</strong> — it takes the same flags as <a href="https://neo4j.com/docs/operations-manual/current/cypher-shell/">cypher-shell</a> (<code>-a</code>, <code>-u</code>, <code>-d</code>, <code>-f</code>, <code>--format</code>, <code>-P</code>), so a script written for one runs on the other</span></li>
                         </ul>
                     </header>
                     <figure>
@@ -847,7 +859,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <div class="get-studio">
                             <p class="get-studio-head">
                                 <strong>drivine CLI</strong>
-                                <span class="get-studio-sub">A cypher-shell drop-in · Alpha {cli.version} · <a href={cli.url}>release notes</a>.</span>
+                                <span class="get-studio-sub">Cypher on any store, from your shell · Alpha {cli.version} · <a href={cli.url}>release notes</a>.</span>
                             </p>
                             <div class="downloads">
                                 <div class="platform">
@@ -863,8 +875,13 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             <p class="from-source">More platforms are on their way (<a href={`${CLI_REPO_URL}/issues/707`}>drivine4j #707</a>); until then, <a href={CLI_REPO_URL}>build it from source</a>. Drivine Studio will install the CLI for you — coming soon.</p>
                         </div>
                     ) : (
-                        <p class="note"><strong>drivine CLI</strong> — the <code>drivine</code> command, a cypher-shell drop-in, is on its way: <a href={CLI_REPO_URL}>build it from source</a> for now. Drivine Studio will install it for you — coming soon.</p>
+                        <p class="note"><strong>drivine CLI</strong> — the <code>drivine</code> command, Cypher on any store from your shell, is on its way: <a href={CLI_REPO_URL}>build it from source</a> for now. Drivine Studio will install it for you — coming soon.</p>
                     )}
+
+                    <p class="star-nudge">
+                        <span>Drivine is free and open source. If it's useful to you, a star helps more developers find it.</span>
+                        <a href={repoUrl('ts')} class="star">★ Star on GitHub{tsStars !== undefined && <span>{starLabel(tsStars)}</span>}</a>
+                    </p>
                 </div>
             </section>
 
