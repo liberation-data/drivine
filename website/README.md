@@ -3,7 +3,9 @@
 The site at [drivine.org](https://drivine.org/), built with
 [Starlight](https://starlight.astro.build) and published by `.github/workflows/website.yml`.
 
-- `src/pages/index.astro`: the landing page.
+- `src/pages/index.astro`: the landing page. Its footer ends with the elements strip, Liberation Data's projects as the
+  four elements of Embabel Worlds (Water: Drivine, lit here); fornax4j.org's landing page has the same strip, so a
+  change to one goes to both.
 - `public/video/`: the landing page's explainer. The page plays it in YouTube's embed while `PLAY_ON_YOUTUBE` in
   `src/pages/index.astro` is true, and from these files when it's false (YouTube served it at 240p in some browsers for
   its first weeks; it plays 1080p now). They're built and served either way. `drivine-explainer.mp4` is re-encoded from
