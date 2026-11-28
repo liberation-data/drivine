@@ -125,6 +125,15 @@ describe('install.sh', () => {
         expect(fs.existsSync(installed())).toBe(false);
     });
 
+    it('refuses a release with the binary but no .sha256 beside it, as before drivine4j#711, and installs nothing', () => {
+        release('download/v0.1.0', 'drivine-linux-x64.tar.gz', '0.1.0');
+        fs.rmSync(path.join(releases, 'download/v0.1.0/drivine-linux-x64.tar.gz.sha256'));
+        const run = install('Linux', 'x86_64', { DRIVINE_VERSION: '0.1.0' });
+        expect(run.status).toBe(1);
+        expect(run.stderr).toContain('drivine-linux-x64.tar.gz.sha256, the checksum to check the binary against.');
+        expect(fs.existsSync(installed())).toBe(false);
+    });
+
     it('takes a .sha256 with an upper-case digest and CRLF line ends', () => {
         release('latest/download', 'drivine-linux-x64.tar.gz', '9.9.9');
         const sha256 = path.join(releases, 'latest/download/drivine-linux-x64.tar.gz.sha256');
