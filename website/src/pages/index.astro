@@ -213,6 +213,15 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .water > .nav { z-index: 3; }
             .water > .graph { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity 1.6s ease; }
             .water > .graph.on { opacity: 1; }
+            /* The hero's water, alive: a seamless loop of the photo's own waves over the still photo, under the graph. It was
+               rendered with Fornax's LTX-2.5 (photo to a calmer variant of it and back), slowed, and mixed 30% with the
+               still photo so the movement stays subtle and the colours match. It and its wash (the same tint
+               as the photo's) fade in once it plays, so until then, and for phones, reduced motion and Save-Data, which
+               never load it, the photo shows as before. */
+            .hero > .waves, .hero > .wash { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0; transition: opacity 0.8s ease; }
+            .hero > .waves { width: 100%; height: 100%; object-fit: cover; object-position: center 38%; }
+            .hero > .wash { background: rgba(1, 65, 78, 0.55); }
+            .hero > .waves.on, .hero > .waves.on + .wash { opacity: 1; }
             @media (max-width: 800px) {
                 .water::before { background-image: linear-gradient(rgba(1, 65, 78, 0.55), rgba(1, 65, 78, 0.55)), var(--photo-small); }
                 .start.water::before { background-image: linear-gradient(rgba(1, 65, 78, 0.82), rgba(1, 65, 78, 0.82)), var(--photo-small); }
@@ -465,6 +474,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
     </head>
     <body style={photoVars}>
         <header class="water hero">
+            <video class="waves" data-src={`${base}video/hero-waves`} muted loop playsinline preload="none" aria-hidden="true" disablepictureinpicture></video>
+            <div class="wash" aria-hidden="true"></div>
             <canvas class="graph" aria-hidden="true"></canvas>
             <nav class="nav wrap" aria-label="Main">
                 <a href={base} class="brand"><img src={image('cow-emblem.png')} alt="" width="36" height="36" /><span>DRIVINE</span></a>
@@ -1158,6 +1169,35 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 })
             );
 
+            // The hero's waves: the loop loads only where it will play (not on phones, with reduced motion or Save-Data), once
+            // the page has loaded so it doesn't compete with the photo, plays while the hero is in view and the tab is shown,
+            // and fades in over the still photo once it's playing. Its files are data-src with .webm and .mp4.
+            const startWaves = () => {
+                const video = document.querySelector<HTMLVideoElement>('.hero > .waves');
+                const still = matchMedia('(prefers-reduced-motion: reduce), (max-width: 800px)');
+                const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
+                if (!video || saveData) return;
+                let inView = false, loaded = false;
+                const sync = () => {
+                    if (still.matches || !inView || document.hidden) { video.pause(); return; }
+                    if (!loaded) {
+                        loaded = true;
+                        for (const type of ['webm', 'mp4']) {
+                            const source = document.createElement('source');
+                            source.src = `${video.dataset.src}.${type}`;
+                            source.type = `video/${type}`;
+                            video.append(source);
+                        }
+                        video.load();
+                    }
+                    video.play().catch(() => {});   // autoplay refused (a browser setting): the photo stays
+                };
+                video.addEventListener('playing', () => video.classList.add('on'));
+                new IntersectionObserver((entries) => { inView = entries.some((it) => it.isIntersecting); sync(); }).observe(video);
+                still.addEventListener('change', () => { if (still.matches) video.classList.remove('on'); sync(); });
+                document.addEventListener('visibilitychange', sync);
+            };
+
             // A faint graph drifting over the water, drawn once the page has loaded so it costs nothing at first paint.
             // It holds still for visitors who ask for less motion, and stops while the hero is out of sight.
             const canvas = document.querySelector<HTMLCanvasElement>('.hero .graph');
@@ -1271,6 +1311,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 if (!nativeHls(document.createElement('video'))) void loadHls();
             };
             const landed = () => {
+                idle(startWaves);
                 idle(drawGraph);
                 idle(warm);
             };
