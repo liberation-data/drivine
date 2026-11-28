@@ -19,6 +19,9 @@ The site at [drivine.org](https://drivine.org/), built with
   `ffmpeg -ss <a second before the end> -i <the video> -frames:v 1 -q:v 4 src/assets/video-end.jpg`), and the length
   on the page: `4:26` in the hero's tip and on the play button, and in words in the button's `aria-label` and the line
   under the player.
+- `public/video/hero-waves.webm` and `hero-waves.mp4`: the hero's water, a silent 9.6 s seamless loop over the still
+  photo (`src/assets/hero-ocean.jpg`), made from it with Fornax's LTX-2.5 and mixed 30% with it, so a new photo needs a
+  new loop. The page loads it once it has loaded, and not on phones, with reduced motion or with Save-Data.
 - `public/og-card.jpg`: the card a shared link to the site shows (the landing page's and every docs page's
   `og:image`), the video's poster `src/assets/video-poster.jpg` cropped to 1200x630. A new poster replaces it too.
 - `public/favicon.svg`: the tab icon on every page, `src/assets/cow-black.png` embedded as a data URI and inverted to
