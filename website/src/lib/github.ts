@@ -195,7 +195,7 @@ export function studioRelease(): Promise<StudioRelease | undefined> {
  * The `drivine` command line's latest build and the native binaries attached to it. The CLI ships from drivine4j (its
  * `drivine4j-cli` module, built with GraalVM to a binary that needs no JVM), so its release is drivine4j's latest, and
  * its assets are named `drivine-<platform>` — `drivine-macos-arm64` is signed and notarized. More platforms land over
- * time (drivine4j#707); this picks each one up by name as its asset appears.
+ * time (drivine4j#706); this picks each one up by name as its asset appears.
  */
 export interface CliRelease {
     version: string;

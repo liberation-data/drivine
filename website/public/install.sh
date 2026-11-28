@@ -87,7 +87,8 @@ fetch "$url" "$tmp/$asset" || fail "couldn't download $url${version:+: is $versi
 fetch "$url.sha256" "$tmp/$asset.sha256" || fail "couldn't download $url.sha256, the checksum to check the binary against."
 
 # The .sha256 is as sha256sum writes it: the digest, two spaces, the file's name.
-expected=$(cut -d ' ' -f 1 < "$tmp/$asset.sha256" | tr 'A-F' 'a-f')
+# A carriage return, from a .sha256 written on Windows, isn't part of the digest.
+expected=$(tr -d '\r' < "$tmp/$asset.sha256" | cut -d ' ' -f 1 | tr 'A-F' 'a-f')
 actual=$(sha256 "$tmp/$asset")
 case "$expected" in
     *[!0-9a-f]* | '') fail "$url.sha256 doesn't hold a SHA-256, so the binary can't be checked. Nothing was installed." ;;
@@ -102,14 +103,14 @@ case "$asset" in
     *.zip)
         # ditto, on macOS, unpacks as Finder does; unzip elsewhere.
         if command -v ditto > /dev/null 2>&1; then
-            ditto -x -k "$tmp/$asset" "$tmp/unpacked"
+            ditto -x -k "$tmp/$asset" "$tmp/unpacked" || fail "couldn't unpack $asset. Nothing was installed."
         elif command -v unzip > /dev/null 2>&1; then
-            unzip -q "$tmp/$asset" -d "$tmp/unpacked"
+            unzip -q "$tmp/$asset" -d "$tmp/unpacked" || fail "couldn't unpack $asset. Nothing was installed."
         else
             fail "this needs unzip to unpack $asset."
         fi
         ;;
-    *.tar.gz) tar -xzf "$tmp/$asset" -C "$tmp/unpacked" ;;
+    *.tar.gz) tar -xzf "$tmp/$asset" -C "$tmp/unpacked" || fail "couldn't unpack $asset. Nothing was installed." ;;
 esac
 [ -f "$tmp/unpacked/drivine" ] || fail "$asset holds no drivine binary. Nothing was installed."
 
@@ -119,7 +120,8 @@ chmod 755 "$tmp/unpacked/drivine"
 mv "$tmp/unpacked/drivine" "$install_dir/.drivine.new" || fail "couldn't write to $install_dir: set DRIVINE_INSTALL_DIR to a folder you can write to."
 mv -f "$install_dir/.drivine.new" "$install_dir/drivine"
 
-if ! installed=$("$install_dir/drivine" --version 2>&1); then
+# Its stdin is /dev/null: under `curl ... | sh` the shell's stdin is the rest of this script.
+if ! installed=$("$install_dir/drivine" --version < /dev/null 2>&1); then
     say "installed $install_dir/drivine, but it doesn't run here:"
     printf '%s\n' "$installed" >&2
     say "On Linux, a glibc older than the one it was built on stops it. JBang runs the CLI's JVM build anywhere:"
