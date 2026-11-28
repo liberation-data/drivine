@@ -234,8 +234,8 @@ async function fetchCliRelease(): Promise<CliRelease | undefined> {
             return label ? { label, url: asset.browser_download_url, size: megabytes(asset.size) } : undefined;
         })
         .filter((download): download is Download => download !== undefined);
-    // No CLI binary attached to the newest drivine4j release: the page says the CLI is on its way and links the repo.
     const installable = assets.some((asset) => asset.name.endsWith('.sha256') && cliPlatform(asset.name.slice(0, -'.sha256'.length)) !== undefined);
+    // No CLI binary attached to the newest drivine4j release: the page says the CLI is on its way and links the repo.
     return downloads.length > 0 ? { version, url: release.html_url, downloads, installable } : undefined;
 }
 
