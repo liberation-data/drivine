@@ -177,6 +177,22 @@ describe('install.sh', () => {
         expect(fs.existsSync(installed())).toBe(false);
     });
 
+    it("says so, and points to JBang, when the installed binary doesn't run", () => {
+        const content = path.join(dir, 'broken');
+        fs.mkdirSync(content);
+        fs.writeFileSync(path.join(content, 'drivine'), '#!/bin/sh\necho "GLIBC_2.38 not found" >&2\nexit 1\n', {
+            mode: 0o755
+        });
+        const tarball = path.join(dir, 'broken.tar.gz');
+        expect(spawnSync('tar', ['-czf', tarball, '-C', content, 'drivine']).status).toBe(0);
+        rawAsset('drivine-linux-x64.tar.gz', fs.readFileSync(tarball));
+        const run = install('Linux', 'x86_64');
+        expect(run.status).toBe(1);
+        expect(run.stderr).toContain(`installed ${installed()}, but it doesn't run here:`);
+        expect(run.stderr).toContain('GLIBC_2.38 not found');
+        expect(run.stderr).toContain('jbang drivine@liberation-data/drivine4j');
+    });
+
     (process.getuid?.() === 0 ? it.skip : it)("says so when it can't write to the install folder", () => {
         release('latest/download', 'drivine-linux-x64.tar.gz', '9.9.9');
         const into = path.join(dir, 'locked');
