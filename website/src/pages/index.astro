@@ -472,6 +472,21 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             footer a { color: #cfe3e7; text-decoration: none; }
             footer a:hover { color: #fff; text-decoration: underline; }
             footer .wrap > .share { flex-basis: 100%; justify-content: center; }
+            /* The elements strip: Liberation Data's projects as the four elements of Embabel Worlds, this site's lit. The same strip is on the other Liberation Data sites (fornax4j.org): keep them in step, apart from colours and which element is lit. */
+            footer .elements { margin-top: 44px; padding-top: 28px; border-top: 1px solid rgba(207, 227, 231, 0.14); display: flex; flex-wrap: wrap; gap: 20px 40px; align-items: center; justify-content: space-between; }
+            footer .elements p { margin: 0; font-size: 14px; color: #7d9ba3; }
+            footer .elements p a { color: #cfe3e7; text-decoration: underline; text-underline-offset: 3px; }
+            footer .elements p a:hover, footer .elements p a:focus-visible { color: #fff; }
+            footer .elements ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 14px 32px; }
+            footer .elements li a, footer .elements li > span { display: flex; align-items: center; gap: 10px; color: #7d9ba3; text-decoration: none; }
+            footer .elements svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+            footer .elements b { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+            footer .elements small { display: block; font-size: 14px; color: #cfe3e7; }
+            footer .elements li a:hover, footer .elements li a:hover small, footer .elements li a:focus-visible, footer .elements li a:focus-visible small { color: #fff; text-decoration: none; }
+            footer .elements li.here a { color: #6fd0dc; }
+            footer .elements li.here small { color: #fff; }
+            footer .elements li.soon svg { opacity: 0.55; }
+            footer .elements li.soon small { color: #7d9ba3; font-style: italic; }
         </style>
     </head>
     <body style={photoVars}>
@@ -961,6 +976,15 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
                 <Share tone="dark" label="Share Drivine" url={SITE} text={SHARE_TEXT} />
+            </div>
+            <div class="wrap elements">
+                <p><a href="https://github.com/liberation-data">Liberation Data</a> is proud to provide four elements of <a href="https://worlds.embabel.com">Embabel Worlds</a></p>
+                <ul>
+                    <li><a href="https://fornax4j.org"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.6 3.4 4.8 5.6 4.8 10.6a4.8 4.8 0 0 1-9.6 0c0-2.3 1-3.8 2.2-5 .2 1.6.9 2.6 1.9 3.1-.6-3.2-.1-6.2.7-8.7Z"/><path d="M12 21.5a2.4 2.4 0 0 1-2.4-2.4c0-1.6 1.4-2.4 2.4-3.9 1 1.5 2.4 2.3 2.4 3.9a2.4 2.4 0 0 1-2.4 2.4Z"/></svg><span><b>Fire</b><small>Fornax</small></span></a></li>
+                    <li class="here"><a href="https://drivine.org" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9c1.6 0 2.4-1.5 3.9-1.5S8.7 9 10.3 9s2.4-1.5 3.8-1.5S16.5 9 18 9s2.4-1.5 3.5-1.5"/><path d="M2.5 13.5c1.6 0 2.4-1.5 3.9-1.5s2.3 1.5 3.9 1.5 2.4-1.5 3.8-1.5 2.4 1.5 3.9 1.5 2.4-1.5 3.5-1.5"/><path d="M2.5 18c1.6 0 2.4-1.5 3.9-1.5S8.7 18 10.3 18s2.4-1.5 3.8-1.5S16.5 18 18 18s2.4-1.5 3.5-1.5"/></svg><span><b>Water</b><small>Drivine</small></span></a></li>
+                    <li><a href="https://github.com/liberation-data/desk"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5h11.5a2.7 2.7 0 1 0-2.7-2.7"/><path d="M3 12.5h16a2.7 2.7 0 1 1-2.7 2.7"/><path d="M3 16.5h7.5a2.2 2.2 0 1 1-2.2 2.2"/></svg><span><b>Air</b><small>Desk</small></span></a></li>
+                    <li class="soon"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 19.5 9 9l3.2 5.1L15 10l6.5 9.5Z"/><path d="m7.2 12 1.8 1.4 1.4-1.2"/></svg><span><b>Earth</b><small>Coming soon</small></span></span></li>
+                </ul>
             </div>
         </footer>
 
