@@ -212,6 +212,8 @@ describe('install.sh', () => {
         ['Darwin', 'x86_64', 'macOS on x86_64'],
         ['FreeBSD', 'amd64', 'FreeBSD on amd64']
     ])('points %s on %s, which has no native binary, to JBang', (os, arch, named) => {
+        // Not under Rosetta, whatever the machine running the test is.
+        fake('sysctl', 'echo 0');
         const run = install(os, arch);
         expect(run.status).toBe(1);
         expect(run.stderr).toContain(`there's no native drivine binary for ${named} yet`);
