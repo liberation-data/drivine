@@ -70,6 +70,8 @@ const studio = await studioRelease();
 const cli = await cliRelease();
 // The hero's and closing call's download link: into the Download section, or to its "on their way" note.
 const downloadHref = `${base}#download`;
+// The drivine CLI's one-line install: public/install.sh, served at the site's root.
+const CLI_INSTALL = 'curl -fsSL https://drivine.org/install.sh | sh';
 // Copy-and-paste Linux installs, one command per distro: dnf installs straight from the URL; apt needs the file local first.
 const linuxInstalls = (studio?.linux ?? []).flatMap((d) => {
     const file = d.url.split('/').pop() ?? '';
@@ -858,6 +860,21 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                                 <span class="get-studio-sub">Cypher on any store, from your shell · Alpha {cli.version} · <a href={cli.url}>release notes</a>.</span>
                             </p>
                             <div class="downloads">
+                                {cli.installable && (
+                                    <div class="platform">
+                                        <h3>From your shell</h3>
+                                        <div class="linux-installs">
+                                            <div class="linux-install">
+                                                <span class="linux-distro">macOS · Linux</span>
+                                                <button type="button" class="cmd-copy" data-copy={CLI_INSTALL} aria-label="Copy the drivine CLI install command">
+                                                    <code>{CLI_INSTALL}</code>
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9z" fill="currentColor" /></svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <p class="install-hint">It picks this machine's binary, checks its SHA-256, and puts <code>drivine</code> in <code>~/.local/bin</code>. <a href={`${base}install.sh`}>Read the script</a> first if you like.</p>
+                                    </div>
+                                )}
                                 <div class="platform">
                                     <h3>Native binary</h3>
                                     <div class="dl-buttons">
@@ -865,10 +882,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                                             <a class="dl-button" href={d.url}>{d.label} <span class="dl-meta">{d.size}</span></a>
                                         ))}
                                     </div>
-                                    <p class="install-hint">Unzip it and put <code>drivine</code> on your <code>PATH</code> (e.g. in <code>/usr/local/bin</code>). The macOS binary is signed and notarized, so it runs with no Gatekeeper prompt.</p>
+                                    <p class="install-hint">Unpack it and put <code>drivine</code> on your <code>PATH</code> (e.g. in <code>/usr/local/bin</code>). The macOS binary is signed and notarized, so it runs with no Gatekeeper prompt.</p>
                                 </div>
                             </div>
-                            <p class="from-source">More platforms are on their way (<a href={`${CLI_REPO_URL}/issues/707`}>drivine4j #707</a>); until then, <a href={CLI_REPO_URL}>build it from source</a>. Drivine Studio will install the CLI for you — coming soon.</p>
+                            <p class="from-source">More platforms are on their way (<a href={`${CLI_REPO_URL}/issues/706`}>drivine4j #706</a>); until then, <a href={CLI_REPO_URL}>build it from source</a>. Drivine Studio will install the CLI for you — coming soon.</p>
                         </div>
                     ) : (
                         <p class="note"><strong>drivine CLI</strong> — the <code>drivine</code> command, Cypher on any store from your shell, is on its way: <a href={CLI_REPO_URL}>build it from source</a> for now. Drivine Studio will install it for you — coming soon.</p>

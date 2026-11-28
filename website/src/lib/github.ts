@@ -201,6 +201,11 @@ export interface CliRelease {
     version: string;
     url: string;
     downloads: Download[];
+    /**
+     * Whether drivine.org/install.sh (`public/install.sh`) installs from this release: it has a binary's `.sha256`
+     * beside it, which the script checks the download against. Releases before drivine4j#711 attached none.
+     */
+    installable: boolean;
 }
 
 /** The platform label for a `drivine-<platform>` CLI asset, or undefined when the asset isn't a CLI binary. */
@@ -230,7 +235,8 @@ async function fetchCliRelease(): Promise<CliRelease | undefined> {
         })
         .filter((download): download is Download => download !== undefined);
     // No CLI binary attached to the newest drivine4j release: the page says the CLI is on its way and links the repo.
-    return downloads.length > 0 ? { version, url: release.html_url, downloads } : undefined;
+    const installable = assets.some((asset) => asset.name.endsWith('.sha256') && cliPlatform(asset.name.slice(0, -'.sha256'.length)) !== undefined);
+    return downloads.length > 0 ? { version, url: release.html_url, downloads, installable } : undefined;
 }
 
 let cli: Promise<CliRelease | undefined> | undefined;
